@@ -172,24 +172,15 @@ class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implements Rust
                         throw new Error(`Unknown unary operator: ${op}`);
                 }
             }
-        } else if (ctx.IDENTIFIER()) {
-            // Function call or method call
-            const identifier = ctx.IDENTIFIER()!.getText();
-            
-            if (ctx.expressionList()) {
-                const args = this.visitExpressionList(ctx.expressionList()!);
-                
-                if (this.functions.has(identifier)) {
-                    // Function call implementation would go here
-                    return null; // Placeholder
-                }
-                
-                throw new Error(`Function ${identifier} not defined`);
-            }
-            
-            // Array access
+        } else if (ctx.getChildCount() === 4) {
+            // Array access: expression '[' expression ']'
+            // Function call: expression '(' expressionList? ')'
+            // Method call: expression '.' IDENTIFIER
             const child1 = ctx.getChild(1);
+            const child2 = ctx.getChild(2);
+            
             if (child1 && child1.getText() === '[') {
+                // Array access
                 const expr0 = ctx.expression(0);
                 const expr1 = ctx.expression(1);
                 
@@ -203,9 +194,36 @@ class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implements Rust
                     
                     throw new Error(`Invalid array access at index ${index}`);
                 }
+            } else if (child1 && child1.getText() === '(') {
+                // Function call
+                const expr0 = ctx.expression(0);
+                if (expr0) {
+                    const func = this.visit(expr0);
+                    const args = ctx.expressionList() ? this.visitExpressionList(ctx.expressionList()) : [];
+                    
+                    if (typeof func === 'function') {
+                        // TODO: Proper function calls
+                        return func(...args);
+                    }
+                    
+                    throw new Error(`${expr0.getText()} is not a function`);
+                }
+            } else if (child1 && child1.getText() === '.') {
+                // Method call or property access
+                const expr0 = ctx.expression(0);
+                if (expr0 && child2) {
+                    const obj = this.visit(expr0);
+                    const prop = child2.getText();
+                    
+                    if (obj && typeof obj === 'object' && prop in obj) {
+                        return obj[prop];
+                    }
+                    
+                    throw new Error(`Property ${prop} not found on object`);
+                }
             }
         }
-        
+
         throw new Error(`Invalid expression: ${ctx.getText()}`);
     }
     

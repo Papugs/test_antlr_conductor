@@ -3,12 +3,17 @@ import terser from "@rollup/plugin-terser";
 import typescript from "@rollup/plugin-typescript";
 
 export default {
-    plugins: [nodeResolve(), typescript()],
-    input: "src/index.ts",
-    output: {
-        plugins: [terser()],
-        dir: "dist",
-        format: "iife",
-        sourcemap: true,
-    }
-}
+  plugins: [
+    nodeResolve(),
+    typescript({
+      exclude: ["**/*.test.ts", "**/*.spec.ts"],
+    }),
+  ],
+  input: "src/index.ts",
+  output: {
+    plugins: [terser()],
+    dir: "dist",
+    format: "iife",
+    sourcemap: true,
+  },
+};

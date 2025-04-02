@@ -11,6 +11,9 @@ import { ParameterListContext } from "./RustParser.js";
 import { ParameterContext } from "./RustParser.js";
 import { ReturnStatementContext } from "./RustParser.js";
 import { IfStatementContext } from "./RustParser.js";
+import { WhileLoopContext } from "./RustParser.js";
+import { BreakStatementContext } from "./RustParser.js";
+import { ContinueStatementContext } from "./RustParser.js";
 import { BlockStatementContext } from "./RustParser.js";
 import { TypeContext } from "./RustParser.js";
 import { ExpressionContext } from "./RustParser.js";
@@ -105,6 +108,36 @@ export class RustListener implements ParseTreeListener {
      * @param ctx the parse tree
      */
     exitIfStatement?: (ctx: IfStatementContext) => void;
+    /**
+     * Enter a parse tree produced by `RustParser.whileLoop`.
+     * @param ctx the parse tree
+     */
+    enterWhileLoop?: (ctx: WhileLoopContext) => void;
+    /**
+     * Exit a parse tree produced by `RustParser.whileLoop`.
+     * @param ctx the parse tree
+     */
+    exitWhileLoop?: (ctx: WhileLoopContext) => void;
+    /**
+     * Enter a parse tree produced by `RustParser.breakStatement`.
+     * @param ctx the parse tree
+     */
+    enterBreakStatement?: (ctx: BreakStatementContext) => void;
+    /**
+     * Exit a parse tree produced by `RustParser.breakStatement`.
+     * @param ctx the parse tree
+     */
+    exitBreakStatement?: (ctx: BreakStatementContext) => void;
+    /**
+     * Enter a parse tree produced by `RustParser.continueStatement`.
+     * @param ctx the parse tree
+     */
+    enterContinueStatement?: (ctx: ContinueStatementContext) => void;
+    /**
+     * Exit a parse tree produced by `RustParser.continueStatement`.
+     * @param ctx the parse tree
+     */
+    exitContinueStatement?: (ctx: ContinueStatementContext) => void;
     /**
      * Enter a parse tree produced by `RustParser.blockStatement`.
      * @param ctx the parse tree

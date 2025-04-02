@@ -2,7 +2,7 @@ import { BasicEvaluator } from "conductor/dist/conductor/runner";
 import { IRunnerPlugin } from "conductor/dist/conductor/runner/types";
 import { CharStream, CommonTokenStream, AbstractParseTreeVisitor } from 'antlr4ng';
 import { RustLexer } from './parser/src/RustLexer';
-import { ExpressionContext, ProgContext, RustParser, StatementContext, VarDeclarationContext, FunctionDeclarationContext, ReturnStatementContext, IfStatementContext, BlockStatementContext, PrimaryContext, LiteralContext, ArrayLiteralContext } from './parser/src/RustParser';
+import { ExpressionContext, ProgContext, RustParser, StatementContext, VarDeclarationContext, FunctionDeclarationContext, ReturnStatementContext, IfStatementContext, BlockStatementContext, PrimaryContext, LiteralContext, ArrayLiteralContext, WhileLoopContext } from './parser/src/RustParser';
 import { RustVisitor } from './parser/src/RustVisitor';
 
 class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implements RustVisitor<any> {
@@ -32,6 +32,12 @@ class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implements Rust
             return this.visit(ctx.ifStatement()!);
         } else if (ctx.blockStatement()) {
             return this.visit(ctx.blockStatement()!);
+        } else if (ctx.whileLoop()) {
+            return this.visit(ctx.whileLoop()!);
+        } else if (ctx.breakStatement()) {
+            return { type: 'break' };
+        } else if (ctx.continueStatement()) {
+            return { type: 'continue' };
         }
         return null;
     }
@@ -84,6 +90,30 @@ class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implements Rust
         
         return null;
     }
+
+    // Visit a parse tree produced by RustParser#whileLoop
+    visitWhileLoop(ctx: WhileLoopContext): any {
+        while (true) {
+            const condition = this.visit(ctx.expression()!);
+            if (!condition) {
+                break;
+            }
+            
+            const result = this.visit(ctx.blockStatement()!);
+            
+            if (result && typeof result === 'object') {
+                if (result.type === 'return') {
+                    return result;
+                } else if (result.type === 'break') {
+                    break;
+                } else if (result.type === 'continue') {
+                    continue;
+                }
+            }
+        }
+        
+        return null;
+    }
     
     // Visit a parse tree produced by RustParser#blockStatement
     visitBlockStatement(ctx: BlockStatementContext): any {
@@ -92,8 +122,9 @@ class RustEvaluatorVisitor extends AbstractParseTreeVisitor<any> implements Rust
         for (const statement of ctx.statement()) {
             result = this.visit(statement);
             
-            // Handle early returns
-            if (result && typeof result === 'object' && result.type === 'return') {
+            // Handle early returns, breaks, and continues
+            if (result && typeof result === 'object' && 
+                (result.type === 'return' || result.type === 'break' || result.type === 'continue')) {
                 return result;
             }
         }

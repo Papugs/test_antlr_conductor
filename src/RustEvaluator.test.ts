@@ -140,6 +140,65 @@ describe('RustEvaluator', () => {
         await evaluator.evaluateChunk('!true;');
         assert.strictEqual(mockConductor.outputs[2], 'Result: false');
     });
+
+    // LOOPS
+    it('should handle while loops', async () => {
+        await evaluator.evaluateChunk(`
+            let i = 0;
+            while (i < 5) {
+                i = i + 1;
+            }
+            i;
+        `);
+        assert.strictEqual(mockConductor.outputs[0], 'Result: 5');
+    });
+    
+    it('should handle break statements', async () => {
+        await evaluator.evaluateChunk(`
+            let i = 0;
+            while (i < 5) {
+                if (i === 3) {
+                    break;
+                }
+                i = i + 1;
+            }
+            i;
+        `);
+        assert.strictEqual(mockConductor.outputs[0], 'Result: 3');
+    });
+    
+    it('should handle continue statements', async () => {
+        await evaluator.evaluateChunk(`
+            let i = 0;
+            while (i < 5) {
+                if (i === 3) {
+                    i = i + 4;
+                    continue;
+                }
+                i = i + 1;
+            }
+            i;
+        `);
+        assert.strictEqual(mockConductor.outputs[0], 'Result: 7');
+    });
+    
+    it('should handle nested loops', async () => {
+        await evaluator.evaluateChunk(`
+            let i = 0;
+            let j = 0;
+            let sum = 0;
+            while (i < 3) {
+                j = 0;
+                while (j < 3) {
+                    sum = sum + 1;
+                    j = j + 1;
+                }
+                i = i + 1;
+            }
+            sum;
+        `);
+        assert.strictEqual(mockConductor.outputs[0], 'Result: 9');
+    });
     
     // ERRORS
     it('should handle errors gracefully', async () => {

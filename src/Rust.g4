@@ -10,6 +10,9 @@ statement
     | returnStatement
     | ifStatement
     | blockStatement
+    | whileLoop
+    | breakStatement
+    | continueStatement
     ;
 
 varDeclaration
@@ -34,6 +37,18 @@ returnStatement
 
 ifStatement
     : 'if' expression blockStatement ('else' (ifStatement | blockStatement))?
+    ;
+
+whileLoop
+    : 'while' expression blockStatement
+    ;
+
+breakStatement
+    : 'break' ';'
+    ;
+
+continueStatement
+    : 'continue' ';'
     ;
 
 blockStatement

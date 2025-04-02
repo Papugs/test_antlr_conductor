@@ -11,6 +11,9 @@ import { ParameterListContext } from "./RustParser.js";
 import { ParameterContext } from "./RustParser.js";
 import { ReturnStatementContext } from "./RustParser.js";
 import { IfStatementContext } from "./RustParser.js";
+import { WhileLoopContext } from "./RustParser.js";
+import { BreakStatementContext } from "./RustParser.js";
+import { ContinueStatementContext } from "./RustParser.js";
 import { BlockStatementContext } from "./RustParser.js";
 import { TypeContext } from "./RustParser.js";
 import { ExpressionContext } from "./RustParser.js";
@@ -76,6 +79,24 @@ export class RustVisitor<Result> extends AbstractParseTreeVisitor<Result> {
      * @return the visitor result
      */
     visitIfStatement?: (ctx: IfStatementContext) => Result;
+    /**
+     * Visit a parse tree produced by `RustParser.whileLoop`.
+     * @param ctx the parse tree
+     * @return the visitor result
+     */
+    visitWhileLoop?: (ctx: WhileLoopContext) => Result;
+    /**
+     * Visit a parse tree produced by `RustParser.breakStatement`.
+     * @param ctx the parse tree
+     * @return the visitor result
+     */
+    visitBreakStatement?: (ctx: BreakStatementContext) => Result;
+    /**
+     * Visit a parse tree produced by `RustParser.continueStatement`.
+     * @param ctx the parse tree
+     * @return the visitor result
+     */
+    visitContinueStatement?: (ctx: ContinueStatementContext) => Result;
     /**
      * Visit a parse tree produced by `RustParser.blockStatement`.
      * @param ctx the parse tree

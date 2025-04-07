@@ -192,4 +192,46 @@ describe("RustEvaluator", () => {
         `);
     assert.strictEqual(mockConductor.outputs[0], "Result: 9");
   });
+
+  it("should handle function declarations and calls", async () => {
+    await evaluator.evaluateChunk(`
+            fn add(a: i32, b: i32) -> i32 {
+                a + b
+            }
+            
+            fn multiply(x: i32, y: i32) -> i32 {
+                x * y
+            }
+            
+            let result = add(3, 4);
+            let final_value = multiply(result, 2);
+            final_value;
+        `);
+    assert.strictEqual(mockConductor.outputs[0], "Result: 14");
+  });
+
+  it("should handle recursive function calls", async () => {
+    await evaluator.evaluateChunk(`
+            fn factorial(n: i32) -> i32 {
+                if n <= 1 {
+                    return 1;
+                }
+                return n * factorial(n - 1);
+            }
+            
+            factorial(5);
+        `);
+    assert.strictEqual(mockConductor.outputs[0], "Result: 120");
+  });
+
+  it("should handle functions with no parameters", async () => {
+    await evaluator.evaluateChunk(`
+            fn get_value() -> i32 {
+                42
+            }
+            
+            get_value();
+        `);
+    assert.strictEqual(mockConductor.outputs[0], "Result: 42");
+  });
 });

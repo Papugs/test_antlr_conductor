@@ -177,7 +177,9 @@ class Heap {
   }
 
   public heap_get_size(address: number): number {
-    const size = this.heap.getUint16(address * this.word_size + this.size_offset);
+    const size = this.heap.getUint16(
+      address * this.word_size + this.size_offset
+    );
     this.log(`Getting size of address ${address}: ${size}`);
     return size;
   }
@@ -195,7 +197,9 @@ class Heap {
     offset: number,
     value: number
   ): void {
-    this.log(`Setting byte at address ${address}, offset ${offset} to: ${value}`);
+    this.log(
+      `Setting byte at address ${address}, offset ${offset} to: ${value}`
+    );
     this.heap.setUint8(address * this.word_size + offset, value);
   }
 
@@ -210,13 +214,17 @@ class Heap {
     offset: number,
     value: number
   ): void {
-    this.log(`Setting 2 bytes at address ${address}, offset ${offset} to: ${value}`);
+    this.log(
+      `Setting 2 bytes at address ${address}, offset ${offset} to: ${value}`
+    );
     this.heap.setUint16(address * this.word_size + offset, value);
   }
 
   public heap_get_2_bytes_at_offset(address: number, offset: number): number {
     const value = this.heap.getUint16(address * this.word_size + offset);
-    this.log(`Getting 2 bytes at address ${address}, offset ${offset}: ${value}`);
+    this.log(
+      `Getting 2 bytes at address ${address}, offset ${offset}: ${value}`
+    );
     return value;
   }
 
@@ -282,7 +290,9 @@ class Heap {
     frame_address: number,
     env_address: number
   ): number {
-    this.log(`Extending Environment ${env_address} with frame ${frame_address}`);
+    this.log(
+      `Extending Environment ${env_address} with frame ${frame_address}`
+    );
     const old_size = this.heap_get_size(env_address);
     const new_env_address = this.heap_allocate_Environment(old_size);
     this.log(`  New environment allocated at: ${new_env_address}`);
@@ -290,11 +300,7 @@ class Heap {
     for (i = 0; i < old_size - 1; i++) {
       const child = this.heap_get_child(env_address, i);
       this.log(`  Copying frame ${i} from old env: ${child}`);
-      this.heap_set_child(
-        new_env_address,
-        i,
-        child
-      );
+      this.heap_set_child(new_env_address, i, child);
     }
     this.log(`  Adding new frame at position ${i}: ${frame_address}`);
     this.heap_set_child(new_env_address, i, frame_address);
@@ -306,7 +312,9 @@ class Heap {
     position: [number, number]
   ): number {
     const [frame_index, value_index] = position;
-    this.log(`Getting value from Environment ${env_address} at position [${frame_index}, ${value_index}]`);
+    this.log(
+      `Getting value from Environment ${env_address} at position [${frame_index}, ${value_index}]`
+    );
     const frame_address = this.heap_get_child(env_address, frame_index);
     this.log(`  Frame address: ${frame_address}`);
     const value = this.heap_get_child(frame_address, value_index);
@@ -320,7 +328,9 @@ class Heap {
     value: number
   ): void {
     const [frame_index, value_index] = position;
-    this.log(`Setting value in Environment ${env_address} at position [${frame_index}, ${value_index}] to ${value}`);
+    this.log(
+      `Setting value in Environment ${env_address} at position [${frame_index}, ${value_index}] to ${value}`
+    );
     const frame_address = this.heap_get_child(env_address, frame_index);
     this.log(`  Frame address: ${frame_address}`);
     this.heap_set_child(frame_address, value_index, value);
@@ -420,7 +430,7 @@ class Heap {
   public address_to_JS_value(address: number): any {
     this.log(`Converting address ${address} to JS value`);
     let result: any;
-    
+
     if (this.is_Boolean(address)) {
       result = this.is_True(address) ? true : false;
     } else if (this.is_Number(address)) {
@@ -436,7 +446,7 @@ class Heap {
     } else {
       result = `unknown tag: ${this.heap_get_tag(address)}`;
     }
-    
+
     this.log(`  Converted to: ${result}`);
     return result;
   }
@@ -444,7 +454,7 @@ class Heap {
   public JS_value_to_address(value: any): number {
     this.log(`Converting JS value to address: ${value}`);
     let address: number;
-    
+
     if (typeof value === "boolean") {
       address = value ? this.True : this.False;
       this.log(`  Boolean ${value} -> address: ${address}`);
@@ -462,10 +472,10 @@ class Heap {
       this.log(`ERROR: ${error}`);
       throw new Error(error);
     }
-    
+
     return address;
   }
-  
+
   // Dump heap state for debugging
   public dumpHeapState(): void {
     this.log("=== HEAP STATE DUMP ===");
@@ -762,7 +772,7 @@ class RustVM {
 class RustCompiler {
   private instructions: Instruction[] = [];
   private wc: number = 0; // Write counter
-  private env: string[][] = [[]]; // Compile-time environment
+  private env: string[][] = []; // Compile-time environment
 
   // Helper for adding instructions
   private emit(instruction: Instruction): void {
@@ -988,7 +998,9 @@ class RustCompiler {
   }
 
   // Compile a block statement
-  private compileBlockStatement(node: BlockStatementContext | ProgContext): void {
+  private compileBlockStatement(
+    node: BlockStatementContext | ProgContext
+  ): void {
     // Find local variables in block
     const locals = this.scanForLocals(node);
 
@@ -1178,7 +1190,7 @@ class RustCompiler {
       const frame = this.env[i];
       const index = frame.indexOf(name);
       if (index !== -1) {
-        return [this.env.length - i - 2, index];
+        return [this.env.length - i - 1, index];
       }
     }
     return null;
@@ -1221,7 +1233,6 @@ class RustEvaluatorVisitor
   visitProg(ctx: ProgContext): any {
     // Compile to instructions
     const program = this.compiler.compile(ctx);
-    console.log(program)
 
     // Load the program into the VM and run it
     this.vm.loadProgram(program);
@@ -1277,6 +1288,7 @@ export class RustEvaluator extends BasicEvaluator {
   }
 }
 
+// For quick tests
 class MockConductor {
   outputs: string[] = [];
 
@@ -1289,10 +1301,9 @@ const mockConductor = new MockConductor();
 const evaluator = new RustEvaluator(mockConductor as any);
 
 evaluator.evaluateChunk(`
-            let x = 10;
-            if (x > 5) {
-                x = 20;
+            fn x() {
+                return 10;
             }
-            x;
+            x();
         `);
 console.log(mockConductor.outputs);

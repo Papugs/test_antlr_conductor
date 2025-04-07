@@ -26,6 +26,8 @@ import {
 } from "./parser/src/RustParser";
 import { RustVisitor } from "./parser/src/RustVisitor";
 
+const DEBUG = false;
+
 // **********************
 // Virtual Machine Types and Constants
 // **********************
@@ -79,55 +81,84 @@ class Heap {
     this.heap_size = heapsize_words;
     const data = new ArrayBuffer(heapsize_words * this.word_size);
     this.heap = new DataView(data);
+    this.log("Initializing heap with size:", heapsize_words, "words");
     this.initializeFreeList();
     this.allocateLiteralValues();
   }
 
+  private log(...args: any[]): void {
+    if (DEBUG) {
+      console.log("[HEAP]", ...args);
+    }
+  }
+
   private initializeFreeList(): void {
     // Initialize free list similar to JS VM
+    this.log("Initializing free list");
     let i = 0;
     for (i = 0; i <= this.heap_size - this.node_size; i = i + this.node_size) {
       this.heap_set(i, i + this.node_size);
+      this.log(`  Free list: ${i} -> ${i + this.node_size}`);
     }
     this.heap_set(i - this.node_size, -1); // End of free list
+    this.log(`  Free list end: ${i - this.node_size} -> -1`);
     this.free = 0;
+    this.log("Free list initialized, free pointer at:", this.free);
   }
 
   private allocateLiteralValues(): void {
+    this.log("Allocating canonical literal values");
     this.False = this.heap_allocate(FALSE_TAG, 1);
+    this.log(`  Allocated False at address: ${this.False}`);
     this.True = this.heap_allocate(TRUE_TAG, 1);
+    this.log(`  Allocated True at address: ${this.True}`);
     this.Null = this.heap_allocate(NULL_TAG, 1);
+    this.log(`  Allocated Null at address: ${this.Null}`);
     this.Unassigned = this.heap_allocate(UNASSIGNED_TAG, 1);
+    this.log(`  Allocated Unassigned at address: ${this.Unassigned}`);
     this.Undefined = this.heap_allocate(UNDEFINED_TAG, 1);
+    this.log(`  Allocated Undefined at address: ${this.Undefined}`);
   }
 
   // Core heap operations
   public heap_allocate(tag: number, size: number): number {
+    this.log(`Allocating node with tag: ${tag}, size: ${size}`);
     if (size > this.node_size) {
-      throw new Error("limitation: nodes cannot be larger than 10 words");
+      const error = `limitation: nodes cannot be larger than ${this.node_size} words`;
+      this.log(`ERROR: ${error}`);
+      throw new Error(error);
     }
     if (this.free === -1) {
       // Later we'll implement mark-sweep here
-      throw new Error("heap memory exhausted");
+      const error = "heap memory exhausted";
+      this.log(`ERROR: ${error}`);
+      throw new Error(error);
     }
     const address = this.free;
     this.free = this.heap_get(this.free);
+    this.log(`  Allocated at address: ${address}, new free: ${this.free}`);
     this.heap.setInt8(address * this.word_size, tag);
     this.heap.setUint16(address * this.word_size + this.size_offset, size);
+    this.log(`  Set tag: ${tag}, size: ${size}`);
     return address;
   }
 
   // Basic heap operations
   public heap_get(address: number): number {
-    return this.heap.getFloat64(address * this.word_size);
+    const value = this.heap.getFloat64(address * this.word_size);
+    this.log(`Getting value at address ${address}: ${value}`);
+    return value;
   }
 
   public heap_set(address: number, x: number): void {
+    this.log(`Setting address ${address} to value: ${x}`);
     this.heap.setFloat64(address * this.word_size, x);
   }
 
   public heap_get_child(address: number, child_index: number): number {
-    return this.heap_get(address + 1 + child_index);
+    const child = this.heap_get(address + 1 + child_index);
+    this.log(`Getting child ${child_index} of address ${address}: ${child}`);
+    return child;
   }
 
   public heap_set_child(
@@ -135,21 +166,27 @@ class Heap {
     child_index: number,
     value: number
   ): void {
+    this.log(`Setting child ${child_index} of address ${address} to: ${value}`);
     this.heap_set(address + 1 + child_index, value);
   }
 
   public heap_get_tag(address: number): number {
-    return this.heap.getInt8(address * this.word_size);
+    const tag = this.heap.getInt8(address * this.word_size);
+    this.log(`Getting tag of address ${address}: ${tag}`);
+    return tag;
   }
 
   public heap_get_size(address: number): number {
-    return this.heap.getUint16(address * this.word_size + this.size_offset);
+    const size = this.heap.getUint16(address * this.word_size + this.size_offset);
+    this.log(`Getting size of address ${address}: ${size}`);
+    return size;
   }
 
   public heap_get_number_of_children(address: number): number {
-    return this.heap_get_tag(address) === NUMBER_TAG
-      ? 0
-      : this.heap_get_size(address) - 1;
+    const tag = this.heap_get_tag(address);
+    const children = tag === NUMBER_TAG ? 0 : this.heap_get_size(address) - 1;
+    this.log(`Getting number of children of address ${address}: ${children}`);
+    return children;
   }
 
   // Low-level byte management
@@ -158,11 +195,14 @@ class Heap {
     offset: number,
     value: number
   ): void {
+    this.log(`Setting byte at address ${address}, offset ${offset} to: ${value}`);
     this.heap.setUint8(address * this.word_size + offset, value);
   }
 
   public heap_get_byte_at_offset(address: number, offset: number): number {
-    return this.heap.getUint8(address * this.word_size + offset);
+    const value = this.heap.getUint8(address * this.word_size + offset);
+    this.log(`Getting byte at address ${address}, offset ${offset}: ${value}`);
+    return value;
   }
 
   public heap_set_2_bytes_at_offset(
@@ -170,65 +210,93 @@ class Heap {
     offset: number,
     value: number
   ): void {
+    this.log(`Setting 2 bytes at address ${address}, offset ${offset} to: ${value}`);
     this.heap.setUint16(address * this.word_size + offset, value);
   }
 
   public heap_get_2_bytes_at_offset(address: number, offset: number): number {
-    return this.heap.getUint16(address * this.word_size + offset);
+    const value = this.heap.getUint16(address * this.word_size + offset);
+    this.log(`Getting 2 bytes at address ${address}, offset ${offset}: ${value}`);
+    return value;
   }
 
   // Type checking
   public is_Number(address: number): boolean {
-    return this.heap_get_tag(address) === NUMBER_TAG;
+    const result = this.heap_get_tag(address) === NUMBER_TAG;
+    this.log(`Checking if address ${address} is Number: ${result}`);
+    return result;
   }
 
   public is_Boolean(address: number): boolean {
-    return this.is_True(address) || this.is_False(address);
+    const result = this.is_True(address) || this.is_False(address);
+    this.log(`Checking if address ${address} is Boolean: ${result}`);
+    return result;
   }
 
   public is_True(address: number): boolean {
-    return this.heap_get_tag(address) === TRUE_TAG;
+    const result = this.heap_get_tag(address) === TRUE_TAG;
+    this.log(`Checking if address ${address} is True: ${result}`);
+    return result;
   }
 
   public is_False(address: number): boolean {
-    return this.heap_get_tag(address) === FALSE_TAG;
+    const result = this.heap_get_tag(address) === FALSE_TAG;
+    this.log(`Checking if address ${address} is False: ${result}`);
+    return result;
   }
 
   public is_Null(address: number): boolean {
-    return this.heap_get_tag(address) === NULL_TAG;
+    const result = this.heap_get_tag(address) === NULL_TAG;
+    this.log(`Checking if address ${address} is Null: ${result}`);
+    return result;
   }
 
   public is_Undefined(address: number): boolean {
-    return this.heap_get_tag(address) === UNDEFINED_TAG;
+    const result = this.heap_get_tag(address) === UNDEFINED_TAG;
+    this.log(`Checking if address ${address} is Undefined: ${result}`);
+    return result;
   }
 
   public is_Unassigned(address: number): boolean {
-    return this.heap_get_tag(address) === UNASSIGNED_TAG;
+    const result = this.heap_get_tag(address) === UNASSIGNED_TAG;
+    this.log(`Checking if address ${address} is Unassigned: ${result}`);
+    return result;
   }
 
   // Environment frames and closures
   public heap_allocate_Frame(number_of_values: number): number {
-    return this.heap_allocate(FRAME_TAG, number_of_values + 1);
+    this.log(`Allocating Frame with ${number_of_values} values`);
+    const address = this.heap_allocate(FRAME_TAG, number_of_values + 1);
+    this.log(`  Frame allocated at address: ${address}`);
+    return address;
   }
 
   public heap_allocate_Environment(number_of_frames: number): number {
-    return this.heap_allocate(ENVIRONMENT_TAG, number_of_frames + 1);
+    this.log(`Allocating Environment with ${number_of_frames} frames`);
+    const address = this.heap_allocate(ENVIRONMENT_TAG, number_of_frames + 1);
+    this.log(`  Environment allocated at address: ${address}`);
+    return address;
   }
 
   public heap_Environment_extend(
     frame_address: number,
     env_address: number
   ): number {
+    this.log(`Extending Environment ${env_address} with frame ${frame_address}`);
     const old_size = this.heap_get_size(env_address);
     const new_env_address = this.heap_allocate_Environment(old_size);
+    this.log(`  New environment allocated at: ${new_env_address}`);
     let i;
     for (i = 0; i < old_size - 1; i++) {
+      const child = this.heap_get_child(env_address, i);
+      this.log(`  Copying frame ${i} from old env: ${child}`);
       this.heap_set_child(
         new_env_address,
         i,
-        this.heap_get_child(env_address, i)
+        child
       );
     }
+    this.log(`  Adding new frame at position ${i}: ${frame_address}`);
     this.heap_set_child(new_env_address, i, frame_address);
     return new_env_address;
   }
@@ -238,8 +306,12 @@ class Heap {
     position: [number, number]
   ): number {
     const [frame_index, value_index] = position;
+    this.log(`Getting value from Environment ${env_address} at position [${frame_index}, ${value_index}]`);
     const frame_address = this.heap_get_child(env_address, frame_index);
-    return this.heap_get_child(frame_address, value_index);
+    this.log(`  Frame address: ${frame_address}`);
+    const value = this.heap_get_child(frame_address, value_index);
+    this.log(`  Value: ${value}`);
+    return value;
   }
 
   public heap_set_Environment_value(
@@ -248,12 +320,16 @@ class Heap {
     value: number
   ): void {
     const [frame_index, value_index] = position;
+    this.log(`Setting value in Environment ${env_address} at position [${frame_index}, ${value_index}] to ${value}`);
     const frame_address = this.heap_get_child(env_address, frame_index);
+    this.log(`  Frame address: ${frame_address}`);
     this.heap_set_child(frame_address, value_index, value);
   }
 
   public heap_allocate_Closure(arity: number, pc: number, env: number): number {
+    this.log(`Allocating Closure with arity: ${arity}, pc: ${pc}, env: ${env}`);
     const address = this.heap_allocate(CLOSURE_TAG, 2);
+    this.log(`  Closure allocated at address: ${address}`);
     this.heap_set_byte_at_offset(address, 1, arity);
     this.heap_set_2_bytes_at_offset(address, 2, pc);
     this.heap_set_child(address, 0, env);
@@ -261,92 +337,147 @@ class Heap {
   }
 
   public is_Closure(address: number): boolean {
-    return this.heap_get_tag(address) === CLOSURE_TAG;
+    const result = this.heap_get_tag(address) === CLOSURE_TAG;
+    this.log(`Checking if address ${address} is Closure: ${result}`);
+    return result;
   }
 
   public heap_get_Closure_arity(address: number): number {
-    return this.heap_get_byte_at_offset(address, 1);
+    const arity = this.heap_get_byte_at_offset(address, 1);
+    this.log(`Getting arity of Closure ${address}: ${arity}`);
+    return arity;
   }
 
   public heap_get_Closure_pc(address: number): number {
-    return this.heap_get_2_bytes_at_offset(address, 2);
+    const pc = this.heap_get_2_bytes_at_offset(address, 2);
+    this.log(`Getting PC of Closure ${address}: ${pc}`);
+    return pc;
   }
 
   public heap_get_Closure_environment(address: number): number {
-    return this.heap_get_child(address, 0);
+    const env = this.heap_get_child(address, 0);
+    this.log(`Getting environment of Closure ${address}: ${env}`);
+    return env;
   }
 
   public heap_allocate_Blockframe(env: number): number {
+    this.log(`Allocating Blockframe with env: ${env}`);
     const address = this.heap_allocate(BLOCKFRAME_TAG, 2);
+    this.log(`  Blockframe allocated at address: ${address}`);
     this.heap_set_child(address, 0, env);
     return address;
   }
 
   public is_Blockframe(address: number): boolean {
-    return this.heap_get_tag(address) === BLOCKFRAME_TAG;
+    const result = this.heap_get_tag(address) === BLOCKFRAME_TAG;
+    this.log(`Checking if address ${address} is Blockframe: ${result}`);
+    return result;
   }
 
   public heap_get_Blockframe_environment(address: number): number {
-    return this.heap_get_child(address, 0);
+    const env = this.heap_get_child(address, 0);
+    this.log(`Getting environment of Blockframe ${address}: ${env}`);
+    return env;
   }
 
   public heap_allocate_Callframe(env: number, pc: number): number {
+    this.log(`Allocating Callframe with env: ${env}, pc: ${pc}`);
     const address = this.heap_allocate(CALLFRAME_TAG, 2);
+    this.log(`  Callframe allocated at address: ${address}`);
     this.heap_set_2_bytes_at_offset(address, 2, pc);
     this.heap_set_child(address, 0, env);
     return address;
   }
 
   public is_Callframe(address: number): boolean {
-    return this.heap_get_tag(address) === CALLFRAME_TAG;
+    const result = this.heap_get_tag(address) === CALLFRAME_TAG;
+    this.log(`Checking if address ${address} is Callframe: ${result}`);
+    return result;
   }
 
   public heap_get_Callframe_environment(address: number): number {
-    return this.heap_get_child(address, 0);
+    const env = this.heap_get_child(address, 0);
+    this.log(`Getting environment of Callframe ${address}: ${env}`);
+    return env;
   }
 
   public heap_get_Callframe_pc(address: number): number {
-    return this.heap_get_2_bytes_at_offset(address, 2);
+    const pc = this.heap_get_2_bytes_at_offset(address, 2);
+    this.log(`Getting PC of Callframe ${address}: ${pc}`);
+    return pc;
   }
 
   // Value management
   public heap_allocate_Number(n: number): number {
+    this.log(`Allocating Number: ${n}`);
     const number_address = this.heap_allocate(NUMBER_TAG, 2);
+    this.log(`  Number allocated at address: ${number_address}`);
     this.heap_set(number_address + 1, n);
     return number_address;
   }
 
   // Conversions between JS values and heap addresses
   public address_to_JS_value(address: number): any {
+    this.log(`Converting address ${address} to JS value`);
+    let result: any;
+    
     if (this.is_Boolean(address)) {
-      return this.is_True(address) ? true : false;
+      result = this.is_True(address) ? true : false;
     } else if (this.is_Number(address)) {
-      return this.heap_get(address + 1);
+      result = this.heap_get(address + 1);
     } else if (this.is_Undefined(address)) {
-      return undefined;
+      result = undefined;
     } else if (this.is_Unassigned(address)) {
-      return "<unassigned>";
+      result = "<unassigned>";
     } else if (this.is_Null(address)) {
-      return null;
+      result = null;
     } else if (this.is_Closure(address)) {
-      return "<closure>";
+      result = "<closure>";
     } else {
-      return `unknown tag: ${this.heap_get_tag(address)}`;
+      result = `unknown tag: ${this.heap_get_tag(address)}`;
     }
+    
+    this.log(`  Converted to: ${result}`);
+    return result;
   }
 
   public JS_value_to_address(value: any): number {
+    this.log(`Converting JS value to address: ${value}`);
+    let address: number;
+    
     if (typeof value === "boolean") {
-      return value ? this.True : this.False;
+      address = value ? this.True : this.False;
+      this.log(`  Boolean ${value} -> address: ${address}`);
     } else if (typeof value === "number") {
-      return this.heap_allocate_Number(value);
+      address = this.heap_allocate_Number(value);
+      this.log(`  Number ${value} -> address: ${address}`);
     } else if (value === undefined) {
-      return this.Undefined;
+      address = this.Undefined;
+      this.log(`  undefined -> address: ${address}`);
     } else if (value === null) {
-      return this.Null;
+      address = this.Null;
+      this.log(`  null -> address: ${address}`);
     } else {
-      throw new Error(`Cannot convert JS value to address: ${value}`);
+      const error = `Cannot convert JS value to address: ${value}`;
+      this.log(`ERROR: ${error}`);
+      throw new Error(error);
     }
+    
+    return address;
+  }
+  
+  // Dump heap state for debugging
+  public dumpHeapState(): void {
+    this.log("=== HEAP STATE DUMP ===");
+    this.log(`Heap size: ${this.heap_size} words`);
+    this.log(`Free pointer: ${this.free}`);
+    this.log(`Canonical values:`);
+    this.log(`  True: ${this.True}`);
+    this.log(`  False: ${this.False}`);
+    this.log(`  Null: ${this.Null}`);
+    this.log(`  Undefined: ${this.Undefined}`);
+    this.log(`  Unassigned: ${this.Unassigned}`);
+    this.log("======================");
   }
 }
 
@@ -407,6 +538,9 @@ class RustVM {
       this.instructions[this.PC].tag !== "DONE"
     ) {
       const instr = this.instructions[this.PC++];
+      if (DEBUG) {
+        console.log("[VM] Executing instruction:", instr);
+      }
       this.executeInstruction(instr);
     }
 
@@ -854,7 +988,7 @@ class RustCompiler {
   }
 
   // Compile a block statement
-  private compileBlockStatement(node: BlockStatementContext): void {
+  private compileBlockStatement(node: BlockStatementContext | ProgContext): void {
     // Find local variables in block
     const locals = this.scanForLocals(node);
 
@@ -1044,7 +1178,7 @@ class RustCompiler {
       const frame = this.env[i];
       const index = frame.indexOf(name);
       if (index !== -1) {
-        return [i, index];
+        return [this.env.length - i - 2, index];
       }
     }
     return null;
@@ -1087,7 +1221,7 @@ class RustEvaluatorVisitor
   visitProg(ctx: ProgContext): any {
     // Compile to instructions
     const program = this.compiler.compile(ctx);
-    // console.log(program)
+    console.log(program)
 
     // Load the program into the VM and run it
     this.vm.loadProgram(program);
@@ -1154,5 +1288,11 @@ class MockConductor {
 const mockConductor = new MockConductor();
 const evaluator = new RustEvaluator(mockConductor as any);
 
-evaluator.evaluateChunk("let x = 10; x;");
+evaluator.evaluateChunk(`
+            let x = 10;
+            if (x > 5) {
+                x = 20;
+            }
+            x;
+        `);
 console.log(mockConductor.outputs);

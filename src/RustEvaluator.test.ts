@@ -65,14 +65,14 @@ describe("RustEvaluator", () => {
   it("should handle if else statements", async () => {
     await evaluator.evaluateChunk(`
             let x = 10;
-            if (x > 5) {
+            if (x == 5) {
                 x = 20;
             } else {
                 x = 0;
             }
             x;
         `);
-    assert.strictEqual(mockConductor.outputs[0], "Result: 20");
+    assert.strictEqual(mockConductor.outputs[0], "Result: 0");
   });
 
   it("should handle else if statements", async () => {

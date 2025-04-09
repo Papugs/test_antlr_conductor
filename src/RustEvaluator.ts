@@ -46,6 +46,8 @@ const FRAME_TAG = 9;
 const ENVIRONMENT_TAG = 10;
 const PAIR_TAG = 11;
 const BUILTIN_TAG = 12;
+const STRING_TAG = 13; // New tag for strings
+const ARRAY_TAG = 14;  // New tag for arrays
 
 // Instructions for VM
 interface Instruction {
@@ -56,6 +58,7 @@ interface Instruction {
   arity?: number;
   pos?: [number, number];
   num?: number;
+  size?: number;
 }
 
 // **********************
@@ -69,6 +72,9 @@ class Heap {
   private word_size = 8;
   private size_offset = 5;
   private node_size = 10;
+  
+  // String storage - maps heap addresses to JS strings
+  private string_table: Map<number, string> = new Map();
 
   // Special canonical values
   public False: number;
@@ -186,7 +192,7 @@ class Heap {
 
   public heap_get_number_of_children(address: number): number {
     const tag = this.heap_get_tag(address);
-    const children = tag === NUMBER_TAG ? 0 : this.heap_get_size(address) - 1;
+    const children = tag === NUMBER_TAG || tag === STRING_TAG || tag === ARRAY_TAG ? 0 : this.heap_get_size(address) - 1;
     this.log(`Getting number of children of address ${address}: ${children}`);
     return children;
   }
@@ -232,6 +238,18 @@ class Heap {
   public is_Number(address: number): boolean {
     const result = this.heap_get_tag(address) === NUMBER_TAG;
     this.log(`Checking if address ${address} is Number: ${result}`);
+    return result;
+  }
+  
+  public is_String(address: number): boolean {
+    const result = this.heap_get_tag(address) === STRING_TAG;
+    this.log(`Checking if address ${address} is String: ${result}`);
+    return result;
+  }
+  
+  public is_Array(address: number): boolean {
+    const result = this.heap_get_tag(address) === ARRAY_TAG;
+    this.log(`Checking if address ${address} is Array: ${result}`);
     return result;
   }
 
@@ -425,6 +443,92 @@ class Heap {
     this.heap_set(number_address + 1, n);
     return number_address;
   }
+  
+  // String management
+  public heap_allocate_String(s: string): number {
+    this.log(`Allocating String: "${s}"`);
+    const string_address = this.heap_allocate(STRING_TAG, 2);
+    this.log(`  String allocated at address: ${string_address}`);
+    
+    // Store the string in the string table
+    this.string_table.set(string_address, s);
+    
+    // We'll use the first child slot to store a reference ID
+    // This isn't used functionally but helps with debugging
+    this.heap_set(string_address + 1, string_address);
+    
+    return string_address;
+  }
+  
+  // Get the string value from an address
+  public heap_get_String(address: number): string {
+    if (!this.is_String(address)) {
+      throw new Error(`Address ${address} is not a string`);
+    }
+    
+    const str = this.string_table.get(address);
+    if (str === undefined) {
+      throw new Error(`String not found at address ${address}`);
+    }
+    
+    return str;
+  }
+  
+  // Array management
+  public heap_allocate_Array(size: number): number {
+    this.log(`Allocating Array with size: ${size}`);
+    // Size + 1 for length storage
+    const array_address = this.heap_allocate(ARRAY_TAG, size + 1);
+    this.log(`  Array allocated at address: ${array_address}`);
+    
+    // Store array length in first slot
+    this.heap_set(array_address + 1, size);
+    
+    // Initialize array elements to undefined
+    for (let i = 0; i < size; i++) {
+      this.heap_set_child(array_address, i + 1, this.Undefined);
+    }
+    
+    return array_address;
+  }
+
+  public heap_get_Array_length(address: number): number {
+    if (!this.is_Array(address)) {
+      throw new Error(`Address ${address} is not an array`);
+    }
+    const length = this.heap_get(address + 1);
+    this.log(`Getting length of Array ${address}: ${length}`);
+    return length;
+  }
+
+  public heap_get_Array_element(address: number, index: number): number {
+    if (!this.is_Array(address)) {
+      throw new Error(`Address ${address} is not an array`);
+    }
+    
+    const length = this.heap_get_Array_length(address);
+    if (index < 0 || index >= length) {
+      throw new Error(`Array index out of bounds: ${index}, length: ${length}`);
+    }
+    
+    const element = this.heap_get_child(address, index + 1);
+    this.log(`Getting Array[${index}] of ${address}: ${element}`);
+    return element;
+  }
+
+  public heap_set_Array_element(address: number, index: number, value: number): void {
+    if (!this.is_Array(address)) {
+      throw new Error(`Address ${address} is not an array`);
+    }
+    
+    const length = this.heap_get_Array_length(address);
+    if (index < 0 || index >= length) {
+      throw new Error(`Array index out of bounds: ${index}, length: ${length}`);
+    }
+    
+    this.log(`Setting Array[${index}] of ${address} to: ${value}`);
+    this.heap_set_child(address, index + 1, value);
+  }
 
   // Conversions between JS values and heap addresses
   public address_to_JS_value(address: number): any {
@@ -435,6 +539,14 @@ class Heap {
       result = this.is_True(address) ? true : false;
     } else if (this.is_Number(address)) {
       result = this.heap_get(address + 1);
+    } else if (this.is_String(address)) {
+      result = this.heap_get_String(address);
+    } else if (this.is_Array(address)) {
+      const length = this.heap_get_Array_length(address);
+      result = [];
+      for (let i = 0; i < length; i++) {
+        result.push(this.address_to_JS_value(this.heap_get_Array_element(address, i)));
+      }
     } else if (this.is_Undefined(address)) {
       result = undefined;
     } else if (this.is_Unassigned(address)) {
@@ -461,6 +573,9 @@ class Heap {
     } else if (typeof value === "number") {
       address = this.heap_allocate_Number(value);
       this.log(`  Number ${value} -> address: ${address}`);
+    } else if (typeof value === "string") {
+      address = this.heap_allocate_String(value);
+      this.log(`  String "${value}" -> address: ${address}`);
     } else if (value === undefined) {
       address = this.Undefined;
       this.log(`  undefined -> address: ${address}`);
@@ -487,6 +602,7 @@ class Heap {
     this.log(`  Null: ${this.Null}`);
     this.log(`  Undefined: ${this.Undefined}`);
     this.log(`  Unassigned: ${this.Unassigned}`);
+    this.log(`String table size: ${this.string_table.size}`);
     this.log("======================");
   }
 }
@@ -608,7 +724,12 @@ class RustVM {
 
         switch (instr.sym) {
           case "+":
-            binopResult = leftVal + rightVal;
+            // Special handling for string concatenation
+            if (typeof leftVal === "string" || typeof rightVal === "string") {
+              binopResult = String(leftVal) + String(rightVal);
+            } else {
+              binopResult = leftVal + rightVal;
+            }
             break;
           case "-":
             binopResult = leftVal - rightVal;
@@ -757,6 +878,43 @@ class RustVM {
         break;
 
       case "DONE": // End of program
+        break;
+
+      case "ARRAY": // Create an array
+        const arraySize = instr.size!;
+        const arrayAddress = this.heap.heap_allocate_Array(arraySize);
+        
+        // Pop values from stack in reverse order and add to array
+        for (let i = arraySize - 1; i >= 0; i--) {
+          this.heap.heap_set_Array_element(arrayAddress, i, this.pop());
+        }
+        
+        // Push array address to stack
+        this.push(arrayAddress);
+        break;
+
+      case "ARRAY_ACCESS": // Access array element
+        const index = this.pop();
+        const array = this.pop();
+        
+        // Check if array is actually an array
+        if (!this.heap.is_Array(array)) {
+          throw new Error("Cannot use array access on non-array value");
+        }
+        
+        // Get the index value
+        const indexValue = this.heap.address_to_JS_value(index);
+        if (typeof indexValue !== "number" || !Number.isInteger(indexValue)) {
+          throw new Error(`Array index must be an integer, got ${typeof indexValue}`);
+        }
+        
+        // Access the array element
+        try {
+          const element = this.heap.heap_get_Array_element(array, indexValue);
+          this.push(element);
+        } catch (error) {
+          throw new Error(`Array index out of bounds: ${indexValue}`);
+        }
         break;
 
       default:
@@ -1052,6 +1210,21 @@ class RustCompiler {
     this.emit({ tag: "LDC", val: undefined });
   }
 
+  // Compile an array literal
+  private compileArrayLiteral(node: ArrayLiteralContext): void {
+    // Get all expressions in the array
+    const expressions = node.expressionList() ? 
+      node.expressionList()!.expression() : [];
+    
+    // Compile each expression in the array (in order)
+    for (const expr of expressions) {
+      this.compileNode(expr);
+    }
+    
+    // Create array with compiled expressions
+    this.emit({ tag: "ARRAY", size: expressions.length });
+  }
+
   // Compile an expression
   private compileExpression(node: ExpressionContext): void {
     if (node.primary()) {
@@ -1135,8 +1308,20 @@ class RustCompiler {
           this.emit({ tag: "CALL", arity: args.length });
         }
       } else if (child1 && child1.getText() === "[") {
-        // Array access (not fully implemented)
-        throw new Error("Array operations not implemented yet");
+        // Array access
+        const arrayExpr = node.expression(0);  // The array expression
+        const indexExpr = node.expression(1);  // The index expression
+        
+        if (arrayExpr && indexExpr) {
+          // Compile array expression
+          this.compileNode(arrayExpr);
+          
+          // Compile index expression
+          this.compileNode(indexExpr);
+          
+          // Emit array access instruction
+          this.emit({ tag: "ARRAY_ACCESS" });
+        }
       } else if (child1 && child1.getText() === ".") {
         // Property access (not fully implemented)
         throw new Error("Property access not implemented yet");
@@ -1153,7 +1338,7 @@ class RustCompiler {
       if (!pos) {
         throw new Error(`Variable ${identifier} not declared`);
       }
-
+  
       this.emit({ tag: "LD", sym: identifier, pos });
     } else if (node.literal()) {
       // Literal
@@ -1162,7 +1347,8 @@ class RustCompiler {
       // Parenthesized expression
       this.compileNode(node.expression()!);
     } else if (node.arrayLiteral()) {
-      throw new Error("Array literals not implemented yet");
+      // Array literal
+      this.compileArrayLiteral(node.arrayLiteral()!);
     }
   }
 

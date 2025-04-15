@@ -1285,10 +1285,12 @@ class RustCompiler {
     const locals = this.scanForLocals(node);
 
     // Create scope
-    this.emit({ tag: "ENTER_SCOPE", num: locals.length });
+    if (locals.length > 0) {
+      this.emit({ tag: "ENTER_SCOPE", num: locals.length });
 
-    // Add locals to environment
-    this.extendEnvironment(locals);
+      // Add locals to environment
+      this.extendEnvironment(locals);
+    }
 
     // Compile statements in block
     let first = true;
@@ -1300,11 +1302,13 @@ class RustCompiler {
       first = false;
     }
 
-    // Exit scope
-    this.emit({ tag: "EXIT_SCOPE" });
+    if (locals.length > 0) {
+      // Exit scope
+      this.emit({ tag: "EXIT_SCOPE" });
 
-    // Remove locals from environment
-    this.env.shift();
+      // Remove locals from environment
+      this.env.shift();
+    }
   }
 
   // Compile a while loop
@@ -1579,7 +1583,7 @@ class RustEvaluatorVisitor
     // Compile to instructions
     const program = this.compiler.compile(ctx);
 
-    if (DEBUG) {
+    if (true) {
       console.log("[Visitor] Compiled program:", program);
     }
 
@@ -1650,9 +1654,9 @@ const mockConductor = new MockConductor();
 const evaluator = new RustEvaluator(mockConductor as any);
 
 evaluator.evaluateChunk(`
-      let x = 5;
-      let y = 10;
-      let z = x + y;
-      println!("Sum: {}", z);
+      fn add(a: i32, b: i32) -> i32 {
+        return a + b;'
+      }
+      add(5, 10);
         `);
 console.log(mockConductor.outputs);

@@ -23,6 +23,7 @@ import {
   ExpressionListContext,
   ParameterListContext,
   ParameterContext,
+  MacroInvocationContext,
 } from "./parser/src/RustParser";
 import { RustVisitor } from "./parser/src/RustVisitor";
 
@@ -47,7 +48,9 @@ const ENVIRONMENT_TAG = 10;
 const PAIR_TAG = 11;
 const BUILTIN_TAG = 12;
 const STRING_TAG = 13; // New tag for strings
-const ARRAY_TAG = 14;  // New tag for arrays
+const ARRAY_TAG = 14; // New tag for arrays
+
+type BuiltinFunction = (...args: unknown[]) => unknown;
 
 // Instructions for VM
 interface Instruction {
@@ -62,6 +65,35 @@ interface Instruction {
 }
 
 // **********************
+// Macro/Builtin Implementation
+// **********************
+
+const BUILTINS = {
+  println: (...args: unknown[]) => {
+    if (args.length === 0) {
+      console.log();
+      return undefined;
+    }
+
+    let format = String(args[0]);
+
+    // Handle formatting placeholders {} in Rust style
+    if (args.length > 1) {
+      let argIndex = 1;
+      format = format.replace(/{}/g, () => {
+        if (argIndex < args.length) {
+          return String(args[argIndex++]);
+        }
+        return "{}";
+      });
+    }
+
+    console.log(format);
+    return undefined;
+  },
+};
+
+// **********************
 // Heap Implementation
 // **********************
 
@@ -72,7 +104,7 @@ class Heap {
   private word_size = 8;
   private size_offset = 5;
   private node_size = 10;
-  
+
   // String storage - maps heap addresses to JS strings
   private string_table: Map<number, string> = new Map();
 
@@ -192,7 +224,10 @@ class Heap {
 
   public heap_get_number_of_children(address: number): number {
     const tag = this.heap_get_tag(address);
-    const children = tag === NUMBER_TAG || tag === STRING_TAG || tag === ARRAY_TAG ? 0 : this.heap_get_size(address) - 1;
+    const children =
+      tag === NUMBER_TAG || tag === STRING_TAG || tag === ARRAY_TAG
+        ? 0
+        : this.heap_get_size(address) - 1;
     this.log(`Getting number of children of address ${address}: ${children}`);
     return children;
   }
@@ -240,13 +275,13 @@ class Heap {
     this.log(`Checking if address ${address} is Number: ${result}`);
     return result;
   }
-  
+
   public is_String(address: number): boolean {
     const result = this.heap_get_tag(address) === STRING_TAG;
     this.log(`Checking if address ${address} is String: ${result}`);
     return result;
   }
-  
+
   public is_Array(address: number): boolean {
     const result = this.heap_get_tag(address) === ARRAY_TAG;
     this.log(`Checking if address ${address} is Array: ${result}`);
@@ -443,52 +478,74 @@ class Heap {
     this.heap_set(number_address + 1, n);
     return number_address;
   }
-  
+
+  // Builtin management
+
+  public is_Builtin(address: number): boolean {
+    const result = this.heap_get_tag(address) === BUILTIN_TAG;
+    this.log(`Checking if address ${address} is Builtin: ${result}`);
+    return result;
+  }
+
+  public heap_allocate_Builtin(id: number): number {
+    this.log(`Allocating Builtin: ${id}`);
+    const address = this.heap_allocate(BUILTIN_TAG, 1);
+    this.log(`  Builtin allocated at address: ${address}`);
+    this.heap_set(address + 1, id);
+    return address;
+  }
+
+  public heap_get_Builtin_id(address: number): number {
+    const id = this.heap_get(address + 1);
+    this.log(`Getting Builtin ID from address ${address}: ${id}`);
+    return id;
+  }
+
   // String management
   public heap_allocate_String(s: string): number {
     this.log(`Allocating String: "${s}"`);
     const string_address = this.heap_allocate(STRING_TAG, 2);
     this.log(`  String allocated at address: ${string_address}`);
-    
+
     // Store the string in the string table
     this.string_table.set(string_address, s);
-    
+
     // We'll use the first child slot to store a reference ID
     // This isn't used functionally but helps with debugging
     this.heap_set(string_address + 1, string_address);
-    
+
     return string_address;
   }
-  
+
   // Get the string value from an address
   public heap_get_String(address: number): string {
     if (!this.is_String(address)) {
       throw new Error(`Address ${address} is not a string`);
     }
-    
+
     const str = this.string_table.get(address);
     if (str === undefined) {
       throw new Error(`String not found at address ${address}`);
     }
-    
+
     return str;
   }
-  
+
   // Array management
   public heap_allocate_Array(size: number): number {
     this.log(`Allocating Array with size: ${size}`);
     // Size + 1 for length storage
     const array_address = this.heap_allocate(ARRAY_TAG, size + 1);
     this.log(`  Array allocated at address: ${array_address}`);
-    
+
     // Store array length in first slot
     this.heap_set(array_address + 1, size);
-    
+
     // Initialize array elements to undefined
     for (let i = 0; i < size; i++) {
       this.heap_set_child(array_address, i + 1, this.Undefined);
     }
-    
+
     return array_address;
   }
 
@@ -505,27 +562,31 @@ class Heap {
     if (!this.is_Array(address)) {
       throw new Error(`Address ${address} is not an array`);
     }
-    
+
     const length = this.heap_get_Array_length(address);
     if (index < 0 || index >= length) {
       throw new Error(`Array index out of bounds: ${index}, length: ${length}`);
     }
-    
+
     const element = this.heap_get_child(address, index + 1);
     this.log(`Getting Array[${index}] of ${address}: ${element}`);
     return element;
   }
 
-  public heap_set_Array_element(address: number, index: number, value: number): void {
+  public heap_set_Array_element(
+    address: number,
+    index: number,
+    value: number
+  ): void {
     if (!this.is_Array(address)) {
       throw new Error(`Address ${address} is not an array`);
     }
-    
+
     const length = this.heap_get_Array_length(address);
     if (index < 0 || index >= length) {
       throw new Error(`Array index out of bounds: ${index}, length: ${length}`);
     }
-    
+
     this.log(`Setting Array[${index}] of ${address} to: ${value}`);
     this.heap_set_child(address, index + 1, value);
   }
@@ -545,7 +606,9 @@ class Heap {
       const length = this.heap_get_Array_length(address);
       result = [];
       for (let i = 0; i < length; i++) {
-        result.push(this.address_to_JS_value(this.heap_get_Array_element(address, i)));
+        result.push(
+          this.address_to_JS_value(this.heap_get_Array_element(address, i))
+        );
       }
     } else if (this.is_Undefined(address)) {
       result = undefined;
@@ -618,6 +681,7 @@ class RustVM {
   private E: number; // Environment pointer
   private RTS: number[]; // Return stack - contains frame addresses
   private instructions: Instruction[];
+  private builtins: Map<string, { id: number, func: BuiltinFunction }>;
 
   constructor(heapsize: number) {
     this.heap = new Heap(heapsize);
@@ -625,11 +689,50 @@ class RustVM {
     this.RTS = [];
     this.PC = 0;
     this.instructions = [];
+    this.builtins = new Map();
 
     // Initialize the environment with an empty frame
     const emptyFrame = this.heap.heap_allocate_Frame(0);
     this.E = this.heap.heap_allocate_Environment(0);
     this.E = this.heap.heap_Environment_extend(emptyFrame, this.E);
+
+    // Register builtin functions
+    this.registerBuiltins();
+  }
+
+  // Register all builtin functions
+  private registerBuiltins(): void {
+    // Create a frame for builtins
+    const builtinFrame = this.heap.heap_allocate_Frame(Object.keys(BUILTINS).length);
+    
+    // Register each builtin function with an ID
+    let id = 0;
+    for (const [name, func] of Object.entries(BUILTINS)) {
+      // Store the function with its ID
+      this.builtins.set(name, { id, func: func as BuiltinFunction });
+      
+      // Allocate the builtin on the heap
+      const builtinAddress = this.heap.heap_allocate_Builtin(id);
+      
+      // Store the builtin in the frame
+      this.heap.heap_set_child(builtinFrame, id, builtinAddress);
+      
+      id++;
+    }
+    
+    // Extend the environment with the builtin frame
+    this.E = this.heap.heap_Environment_extend(builtinFrame, this.E);
+  }
+
+  // Execute a specific builtin function by ID
+  public executeBuiltin(id: number, args: unknown[]): unknown {
+    // Find the builtin function by ID
+    for (const [_, builtin] of this.builtins.entries()) {
+      if (builtin.id === id) {
+        return builtin.func(...args);
+      }
+    }
+    throw new Error(`Unknown builtin function with ID: ${id}`);
   }
 
   // Initialize the VM with a program
@@ -816,8 +919,20 @@ class RustVM {
         const arity = instr.arity!;
         const fun = this.peek(arity);
 
-        if (!this.heap.is_Closure(fun)) {
-          throw new Error("Calling a non-function");
+        if (this.heap.is_Builtin(fun)) {
+          // Collect arguments from stack
+          const args = [];
+          for (let i = arity - 1; i >= 0; i--) {
+            args.unshift(this.heap.address_to_JS_value(this.pop()) as never);
+          }
+          this.pop(); // Remove function reference
+          const builtin_id = this.heap.heap_get_Builtin_id(fun);
+
+          // Call the builtin and push result
+          const result = this.executeBuiltin(builtin_id, args);
+          this.push(this.heap.JS_value_to_address(result));
+          break;
+          return
         }
 
         const new_PC = this.heap.heap_get_Closure_pc(fun);
@@ -883,12 +998,12 @@ class RustVM {
       case "ARRAY": // Create an array
         const arraySize = instr.size!;
         const arrayAddress = this.heap.heap_allocate_Array(arraySize);
-        
+
         // Pop values from stack in reverse order and add to array
         for (let i = arraySize - 1; i >= 0; i--) {
           this.heap.heap_set_Array_element(arrayAddress, i, this.pop());
         }
-        
+
         // Push array address to stack
         this.push(arrayAddress);
         break;
@@ -896,18 +1011,20 @@ class RustVM {
       case "ARRAY_ACCESS": // Access array element
         const index = this.pop();
         const array = this.pop();
-        
+
         // Check if array is actually an array
         if (!this.heap.is_Array(array)) {
           throw new Error("Cannot use array access on non-array value");
         }
-        
+
         // Get the index value
         const indexValue = this.heap.address_to_JS_value(index);
         if (typeof indexValue !== "number" || !Number.isInteger(indexValue)) {
-          throw new Error(`Array index must be an integer, got ${typeof indexValue}`);
+          throw new Error(
+            `Array index must be an integer, got ${typeof indexValue}`
+          );
         }
-        
+
         // Access the array element
         try {
           const element = this.heap.heap_get_Array_element(array, indexValue);
@@ -931,6 +1048,7 @@ class RustCompiler {
   private instructions: Instruction[] = [];
   private wc: number = 0; // Write counter
   private env: string[][] = []; // Compile-time environment
+  private builtins: Set<string> = new Set(["println"]);
 
   // Helper for adding instructions
   private emit(instruction: Instruction): void {
@@ -941,6 +1059,10 @@ class RustCompiler {
   public compile(node: any): Instruction[] {
     this.instructions = [];
     this.wc = 0;
+
+    // Add builtins to environment
+    this.env = [Array.from(this.builtins), []];
+
     this.compileNode(node);
     this.emit({ tag: "DONE" });
     return this.instructions;
@@ -1213,14 +1335,15 @@ class RustCompiler {
   // Compile an array literal
   private compileArrayLiteral(node: ArrayLiteralContext): void {
     // Get all expressions in the array
-    const expressions = node.expressionList() ? 
-      node.expressionList()!.expression() : [];
-    
+    const expressions = node.expressionList()
+      ? node.expressionList()!.expression()
+      : [];
+
     // Compile each expression in the array (in order)
     for (const expr of expressions) {
       this.compileNode(expr);
     }
-    
+
     // Create array with compiled expressions
     this.emit({ tag: "ARRAY", size: expressions.length });
   }
@@ -1228,7 +1351,7 @@ class RustCompiler {
   // Compile an expression
   private compileExpression(node: ExpressionContext): void {
     if (node.primary()) {
-      // Primary expression (identifier, literal, parenthesized expression)
+      // Primary expression (identifier, literal, parenthesized expression, macro invocation)
       this.compilePrimary(node.primary()!);
     } else if (node.getChildCount() === 3) {
       const child0 = node.getChild(0);
@@ -1315,16 +1438,16 @@ class RustCompiler {
         }
       } else if (child1 && child1.getText() === "[") {
         // Array access
-        const arrayExpr = node.expression(0);  // The array expression
-        const indexExpr = node.expression(1);  // The index expression
-        
+        const arrayExpr = node.expression(0); // The array expression
+        const indexExpr = node.expression(1); // The index expression
+
         if (arrayExpr && indexExpr) {
           // Compile array expression
           this.compileNode(arrayExpr);
-          
+
           // Compile index expression
           this.compileNode(indexExpr);
-          
+
           // Emit array access instruction
           this.emit({ tag: "ARRAY_ACCESS" });
         }
@@ -1337,14 +1460,17 @@ class RustCompiler {
 
   // Compile a primary expression
   private compilePrimary(node: PrimaryContext): void {
-    if (node.IDENTIFIER()) {
+    if (node.macroInvocation()) {
+      // Macro invocation
+      this.compileMacroInvocation(node.macroInvocation()!);
+    } else if (node.IDENTIFIER()) {
       // Variable reference
       const identifier = node.IDENTIFIER()!.getText();
       const pos = this.lookupVariable(identifier);
       if (!pos) {
         throw new Error(`Variable ${identifier} not declared`);
       }
-  
+
       this.emit({ tag: "LD", sym: identifier, pos });
     } else if (node.literal()) {
       // Literal
@@ -1356,6 +1482,27 @@ class RustCompiler {
       // Array literal
       this.compileArrayLiteral(node.arrayLiteral()!);
     }
+  }
+
+  // Compile a macro invocation
+  private compileMacroInvocation(node: MacroInvocationContext): void {
+    const macroName = node.BUILTIN()!.getText();
+    const args = node.macroArguments()!.expression();
+
+    const pos = this.lookupVariable(macroName);
+    if (!pos) {
+      throw new Error(`Variable ${macroName} not declared`);
+    }
+
+    this.emit({ tag: "LD", sym: macroName, pos });
+
+    // Push all arguments to the operand stack
+    for (const arg of args) {
+      this.compileNode(arg);
+    }
+
+    // Emit the call instruction with the macro name and arity
+    this.emit({ tag: "CALL", arity: args.length });
   }
 
   // Compile a literal value
@@ -1380,9 +1527,11 @@ class RustCompiler {
   private lookupVariable(name: string): [number, number] | null {
     for (let i = 0; i < this.env.length; i++) {
       const frame = this.env[i];
-      const index = frame.indexOf(name);
+      let index = frame.indexOf(name);
       if (index !== -1) {
-        return [this.env.length - i - 1, index];
+        const frame_num = this.env.length - i - 1;
+        index = frame_num === 0 ? index + 8 : index;
+        return [frame_num, index];
       }
     }
     return null;
@@ -1430,7 +1579,9 @@ class RustEvaluatorVisitor
     // Compile to instructions
     const program = this.compiler.compile(ctx);
 
-    console.log("[Visitor] Compiled program:", program);
+    if (DEBUG) {
+      console.log("[Visitor] Compiled program:", program);
+    }
 
     // Load the program into the VM and run it
     this.vm.loadProgram(program);
@@ -1499,10 +1650,9 @@ const mockConductor = new MockConductor();
 const evaluator = new RustEvaluator(mockConductor as any);
 
 evaluator.evaluateChunk(`
-            fn add(a: i32, b: i32) -> i32 {
-                return a + b;
-            }
-            
-            add(3, 4);
+      let x = 5;
+      let y = 10;
+      let z = x + y;
+      println!("Sum: {}", z);
         `);
 console.log(mockConductor.outputs);

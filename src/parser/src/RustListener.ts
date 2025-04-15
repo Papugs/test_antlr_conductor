@@ -19,6 +19,8 @@ import { TypeContext } from "./RustParser.js";
 import { ExpressionContext } from "./RustParser.js";
 import { PrimaryContext } from "./RustParser.js";
 import { ArrayLiteralContext } from "./RustParser.js";
+import { MacroInvocationContext } from "./RustParser.js";
+import { MacroArgumentsContext } from "./RustParser.js";
 import { ExpressionListContext } from "./RustParser.js";
 import { LiteralContext } from "./RustParser.js";
 
@@ -188,6 +190,26 @@ export class RustListener implements ParseTreeListener {
      * @param ctx the parse tree
      */
     exitArrayLiteral?: (ctx: ArrayLiteralContext) => void;
+    /**
+     * Enter a parse tree produced by `RustParser.macroInvocation`.
+     * @param ctx the parse tree
+     */
+    enterMacroInvocation?: (ctx: MacroInvocationContext) => void;
+    /**
+     * Exit a parse tree produced by `RustParser.macroInvocation`.
+     * @param ctx the parse tree
+     */
+    exitMacroInvocation?: (ctx: MacroInvocationContext) => void;
+    /**
+     * Enter a parse tree produced by `RustParser.macroArguments`.
+     * @param ctx the parse tree
+     */
+    enterMacroArguments?: (ctx: MacroArgumentsContext) => void;
+    /**
+     * Exit a parse tree produced by `RustParser.macroArguments`.
+     * @param ctx the parse tree
+     */
+    exitMacroArguments?: (ctx: MacroArgumentsContext) => void;
     /**
      * Enter a parse tree produced by `RustParser.expressionList`.
      * @param ctx the parse tree

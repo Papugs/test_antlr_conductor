@@ -235,8 +235,8 @@ describe("RustEvaluator", () => {
     assert.strictEqual(mockConductor.outputs[0], "Result: 42");
   });
 
-  it("TEST", async () => {
-    await evaluator.evaluateChunk(`let x : i32 = 42; x;`);
-    assert.strictEqual(mockConductor.outputs[0], "Result: 42");
+  it("should handle builtin functions", async () => {
+    await evaluator.evaluateChunk("println!(\"Hello, world!\");");
+    assert.strictEqual(mockConductor.outputs[0], "Result: undefined");
   });
 });

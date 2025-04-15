@@ -19,6 +19,8 @@ import { TypeContext } from "./RustParser.js";
 import { ExpressionContext } from "./RustParser.js";
 import { PrimaryContext } from "./RustParser.js";
 import { ArrayLiteralContext } from "./RustParser.js";
+import { MacroInvocationContext } from "./RustParser.js";
+import { MacroArgumentsContext } from "./RustParser.js";
 import { ExpressionListContext } from "./RustParser.js";
 import { LiteralContext } from "./RustParser.js";
 
@@ -127,6 +129,18 @@ export class RustVisitor<Result> extends AbstractParseTreeVisitor<Result> {
      * @return the visitor result
      */
     visitArrayLiteral?: (ctx: ArrayLiteralContext) => Result;
+    /**
+     * Visit a parse tree produced by `RustParser.macroInvocation`.
+     * @param ctx the parse tree
+     * @return the visitor result
+     */
+    visitMacroInvocation?: (ctx: MacroInvocationContext) => Result;
+    /**
+     * Visit a parse tree produced by `RustParser.macroArguments`.
+     * @param ctx the parse tree
+     * @return the visitor result
+     */
+    visitMacroArguments?: (ctx: MacroArgumentsContext) => Result;
     /**
      * Visit a parse tree produced by `RustParser.expressionList`.
      * @param ctx the parse tree

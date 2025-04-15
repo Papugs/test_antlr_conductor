@@ -82,7 +82,8 @@ expression
     ;
 
 primary
-    : IDENTIFIER
+    : macroInvocation
+    | IDENTIFIER
     | literal
     | '(' expression ')'
     | arrayLiteral
@@ -91,6 +92,14 @@ primary
 arrayLiteral
     : '[' expressionList? ']'
     | 'vec!' '[' expressionList? ']'
+    ;
+
+macroInvocation
+    : BUILTIN '!' ('(' macroArguments ')' | '[' macroArguments ']' | '{' macroArguments '}')
+    ;
+
+macroArguments
+    : (expression | STRING) (',' (expression | STRING))* ','?
     ;
 
 expressionList
@@ -109,6 +118,7 @@ BOOL: 'true' | 'false';
 INT: [0-9]+;
 FLOAT: [0-9]+ '.' [0-9]+;
 STRING: '"' (~["\r\n] | '\\"')* '"';
+BUILTIN: 'println';
 IDENTIFIER: [a-zA-Z_][a-zA-Z0-9_]*;
 COMMENT: '//' ~[\r\n]* -> skip;
 BLOCK_COMMENT: '/*' .*? '*/' -> skip;

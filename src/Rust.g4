@@ -20,8 +20,7 @@ varDeclaration
     ;
 
 functionDeclaration
-    : 'fn' IDENTIFIER '()' ('->' type)? blockStatement
-    | 'fn' IDENTIFIER '(' parameterList ')' ('->' type)? blockStatement
+    : 'fn' IDENTIFIER ('(' parameterList? ')' | '()') ('->' type)? blockStatement
     ;
 
 parameterList
@@ -69,11 +68,9 @@ type
 
 expression
     : primary
-    | expression '.' IDENTIFIER ('(' expressionList? ')')?
-    | expression '.' IDENTIFIER '()'?
+    | expression '.' IDENTIFIER ('(' expressionList? ')' | '()')?
     | expression '[' expression ']'
-    | expression '(' expressionList? ')'
-    | expression '()'
+    | expression ('(' expressionList? ')' | '()')
     | ('!'|'-') expression
     | expression op=('*'|'/'|'%') expression
     | expression op=('+'|'-') expression

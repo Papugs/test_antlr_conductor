@@ -1103,11 +1103,17 @@ class RustCompiler {
         }
       }
     } else if (node.getChildCount() === 2) {
-      // Unary operation
+      // Unary operation or function call with no parameters
       const child0 = node.getChild(0);
+      const child1 = node.getChild(1);
       const expr0 = node.expression(0);
 
-      if (child0 && expr0) {
+      if (child0 && expr0 && child1 && child1.getText() === "()") {
+        // Function call with no parameters
+        this.compileNode(expr0);
+        this.emit({ tag: "CALL", arity: 0 });
+      } else if (child0 && expr0) {
+        // Unary operation
         const op = child0.getText();
         this.compileNode(expr0);
         this.emit({ tag: "UNOP", sym: op });
@@ -1205,6 +1211,10 @@ class RustCompiler {
         const varDecl = statement.varDeclaration()!;
         const identifier = varDecl.IDENTIFIER()!.getText();
         locals.push(identifier);
+      } else if (statement.functionDeclaration()) {
+        const funcDecl = statement.functionDeclaration()!;
+        const identifier = funcDecl.IDENTIFIER()!.getText();
+        locals.push(identifier);
       }
     }
 
@@ -1233,6 +1243,8 @@ class RustEvaluatorVisitor
   visitProg(ctx: ProgContext): any {
     // Compile to instructions
     const program = this.compiler.compile(ctx);
+
+    console.log("[Visitor] Compiled program:", program);
 
     // Load the program into the VM and run it
     this.vm.loadProgram(program);
@@ -1301,9 +1313,10 @@ const mockConductor = new MockConductor();
 const evaluator = new RustEvaluator(mockConductor as any);
 
 evaluator.evaluateChunk(`
-            fn x() {
-                return 10;
+            fn add(a: i32, b: i32) -> i32 {
+                return a + b;
             }
-            x();
+            
+            add(3, 4);
         `);
 console.log(mockConductor.outputs);

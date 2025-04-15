@@ -196,11 +196,11 @@ describe("RustEvaluator", () => {
   it("should handle function declarations and calls", async () => {
     await evaluator.evaluateChunk(`
             fn add(a: i32, b: i32) -> i32 {
-                a + b
+                return a + b;
             }
             
             fn multiply(x: i32, y: i32) -> i32 {
-                x * y
+                return x * y;
             }
             
             let result = add(3, 4);

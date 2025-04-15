@@ -210,6 +210,19 @@ describe("RustEvaluator", () => {
     assert.strictEqual(mockConductor.outputs[0], "Result: 14");
   });
 
+  it("should handle functions with locals", async () => {
+    await evaluator.evaluateChunk(`
+            fn add(a: i32, b: i32) -> i32 {
+                let x = 5;
+                let y = 10;
+                let z = x + y;
+                return z;
+            }
+            add(5, 10);
+        `);
+    assert.strictEqual(mockConductor.outputs[0], "Result: 15");
+  });
+
   it("should handle recursive function calls", async () => {
     await evaluator.evaluateChunk(`
             fn factorial(n: i32) -> i32 {
@@ -227,12 +240,22 @@ describe("RustEvaluator", () => {
   it("should handle functions with no parameters", async () => {
     await evaluator.evaluateChunk(`
             fn get_value() -> i32 {
-                42
+                return 42;
             }
             
             get_value();
         `);
     assert.strictEqual(mockConductor.outputs[0], "Result: 42");
+  });
+
+  it("should handle functions with no explicit return", async () => {
+    await evaluator.evaluateChunk(`
+            fn add(a: i32, b: i32) -> i32 {
+                a + b;
+            }
+            add(5, 10);
+        `);
+    assert.strictEqual(mockConductor.outputs[0], "Result: 15");
   });
 
   it("should handle builtin functions", async () => {

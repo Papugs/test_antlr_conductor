@@ -1171,10 +1171,7 @@ class RustCompiler {
 
     // Compile function body
     this.compileNode(node.blockStatement()!);
-
-    // Add return undefined if no explicit return
-    this.emit({ tag: "LDC", val: undefined });
-    this.emit({ tag: "RESET" });
+    this.emit({ tag: "RESET" }); // Will return last value like in Rust
 
     // Set the jump address to skip over function body
     jumpInstruction.addr = this.wc;
@@ -1654,9 +1651,9 @@ const mockConductor = new MockConductor();
 const evaluator = new RustEvaluator(mockConductor as any);
 
 evaluator.evaluateChunk(`
-      fn add(a: i32, b: i32) -> i32 {
-        return a + b;'
+      fn get_value() -> i32 {
+        42;
       }
-      add(5, 10);
+      get_value();
         `);
 console.log(mockConductor.outputs);

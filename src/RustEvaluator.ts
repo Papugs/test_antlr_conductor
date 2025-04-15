@@ -29,6 +29,8 @@ import { RustVisitor } from "./parser/src/RustVisitor";
 
 let DEBUG = false;
 
+let globalConductor: IRunnerPlugin;
+
 // **********************
 // Virtual Machine Types and Constants
 // **********************
@@ -80,15 +82,25 @@ const BUILTINS = {
     // Handle formatting placeholders {} in Rust style
     if (args.length > 1) {
       let argIndex = 1;
-      format = format.replace(/{}/g, () => {
+      format = format.replace(/\{(:?[^{}]*)\}/g, (match, formatSpecifier) => {
         if (argIndex < args.length) {
-          return String(args[argIndex++]);
+          const value = args[argIndex++];
+          
+          // Handle debug formatting for arrays with {:?}
+          if (formatSpecifier === ":?") {
+            if (Array.isArray(value)) {
+              return "[" + value.join(",") + "]";
+            }
+          }
+          
+          return String(value);
         }
-        return "{}";
+        return match;
       });
     }
 
     console.log(format);
+    globalConductor.sendOutput(format); // For tests
     return undefined;
   },
 };
@@ -684,7 +696,7 @@ class RustVM {
   private E: number; // Environment pointer
   private RTS: number[]; // Return stack - contains frame addresses
   private instructions: Instruction[];
-  private builtins: Map<string, { id: number, func: BuiltinFunction }>;
+  private builtins: Map<string, { id: number; func: BuiltinFunction }>;
 
   constructor(heapsize: number, debug: boolean = false) {
     this.heap = new Heap(heapsize);
@@ -695,7 +707,7 @@ class RustVM {
     this.builtins = new Map();
 
     this.log("Initializing RustVM");
-    
+
     // Initialize the environment with an empty frame
     const emptyFrame = this.heap.heap_allocate_Frame(0);
     this.E = this.heap.heap_allocate_Environment(0);
@@ -716,25 +728,29 @@ class RustVM {
   private registerBuiltins(): void {
     this.log("Registering builtin functions");
     // Create a frame for builtins
-    const builtinFrame = this.heap.heap_allocate_Frame(Object.keys(BUILTINS).length);
+    const builtinFrame = this.heap.heap_allocate_Frame(
+      Object.keys(BUILTINS).length
+    );
     this.log(`Created builtin frame at address: ${builtinFrame}`);
-    
+
     // Register each builtin function with an ID
     let id = 0;
     for (const [name, func] of Object.entries(BUILTINS)) {
       // Store the function with its ID
       this.builtins.set(name, { id, func: func as BuiltinFunction });
-      
+
       // Allocate the builtin on the heap
       const builtinAddress = this.heap.heap_allocate_Builtin(id);
-      
+
       // Store the builtin in the frame
       this.heap.heap_set_child(builtinFrame, id, builtinAddress);
-      this.log(`Registered builtin '${name}' with ID ${id} at address ${builtinAddress}`);
-      
+      this.log(
+        `Registered builtin '${name}' with ID ${id} at address ${builtinAddress}`
+      );
+
       id++;
     }
-    
+
     // Extend the environment with the builtin frame
     this.E = this.heap.heap_Environment_extend(builtinFrame, this.E);
     this.log(`Extended environment with builtins: E=${this.E}`);
@@ -793,7 +809,7 @@ class RustVM {
       this.instructions[this.PC].tag !== "DONE"
     ) {
       const instr = this.instructions[this.PC++];
-      this.log(`Executing instruction at PC=${this.PC-1}: ${instr.tag}`);
+      this.log(`Executing instruction at PC=${this.PC - 1}: ${instr.tag}`);
       this.executeInstruction(instr);
     }
 
@@ -811,7 +827,9 @@ class RustVM {
         break;
 
       case "LD": // Load variable
-        this.log(`LD: Loading variable at position ${instr.pos}, symbol: ${instr.sym}`);
+        this.log(
+          `LD: Loading variable at position ${instr.pos}, symbol: ${instr.sym}`
+        );
         const val = this.heap.heap_get_Environment_value(this.E, instr.pos!);
         if (this.heap.is_Unassigned(val)) {
           throw new Error(`Variable ${instr.sym} is unassigned`);
@@ -936,7 +954,9 @@ class RustVM {
         this.RTS.push(this.heap.heap_allocate_Blockframe(this.E));
         const frame_address = this.heap.heap_allocate_Frame(instr.num!);
         this.E = this.heap.heap_Environment_extend(frame_address, this.E);
-        this.log(`ENTER_SCOPE: New environment E=${this.E}, frame=${frame_address}`);
+        this.log(
+          `ENTER_SCOPE: New environment E=${this.E}, frame=${frame_address}`
+        );
 
         // Initialize variables as unassigned
         for (let i = 0; i < instr.num!; i++) {
@@ -948,11 +968,15 @@ class RustVM {
         this.log("EXIT_SCOPE: Exiting current scope");
         const oldE = this.E;
         this.E = this.heap.heap_get_Blockframe_environment(this.RTS.pop()!);
-        this.log(`EXIT_SCOPE: Restored environment from E=${oldE} to E=${this.E}`);
+        this.log(
+          `EXIT_SCOPE: Restored environment from E=${oldE} to E=${this.E}`
+        );
         break;
 
       case "LDF": // Load function (create closure)
-        this.log(`LDF: Creating closure with arity ${instr.arity}, address ${instr.addr}`);
+        this.log(
+          `LDF: Creating closure with arity ${instr.arity}, address ${instr.addr}`
+        );
         const closure_address = this.heap.heap_allocate_Closure(
           instr.arity!,
           instr.addr!,
@@ -965,7 +989,9 @@ class RustVM {
       case "CALL": // Call function
         const arity = instr.arity!;
         const fun = this.peek(arity);
-        this.log(`CALL: Calling function at address ${fun} with arity ${arity}`);
+        this.log(
+          `CALL: Calling function at address ${fun} with arity ${arity}`
+        );
 
         if (this.heap.is_Builtin(fun)) {
           this.log(`CALL: Function is a builtin`);
@@ -976,13 +1002,17 @@ class RustVM {
           }
           this.pop(); // Remove function reference
           const builtin_id = this.heap.heap_get_Builtin_id(fun);
-          this.log(`CALL: Executing builtin with ID ${builtin_id}, args: ${JSON.stringify(args)}`);
+          this.log(
+            `CALL: Executing builtin with ID ${builtin_id}, args: ${JSON.stringify(
+              args
+            )}`
+          );
 
           // Call the builtin and push result
           const result = this.executeBuiltin(builtin_id, args);
           this.push(this.heap.JS_value_to_address(result));
           break;
-          return
+          return;
         }
 
         const new_PC = this.heap.heap_get_Closure_pc(fun);
@@ -1002,7 +1032,9 @@ class RustVM {
         // Save current state for return
         const callframe = this.heap.heap_allocate_Callframe(this.E, this.PC);
         this.RTS.push(callframe);
-        this.log(`CALL: Saved return state at ${callframe}, PC=${this.PC}, E=${this.E}`);
+        this.log(
+          `CALL: Saved return state at ${callframe}, PC=${this.PC}, E=${this.E}`
+        );
 
         // Set new environment and program counter
         const oldEnv = this.E;
@@ -1011,13 +1043,17 @@ class RustVM {
           this.heap.heap_get_Closure_environment(fun)
         );
         this.PC = new_PC;
-        this.log(`CALL: Set new environment E=${this.E} (was ${oldEnv}) and PC=${this.PC}`);
+        this.log(
+          `CALL: Set new environment E=${this.E} (was ${oldEnv}) and PC=${this.PC}`
+        );
         break;
 
       case "TAIL_CALL": // Tail call optimization
         const tailArity = instr.arity!;
         const tailFun = this.peek(tailArity);
-        this.log(`TAIL_CALL: Tail calling function at ${tailFun} with arity ${tailArity}`);
+        this.log(
+          `TAIL_CALL: Tail calling function at ${tailFun} with arity ${tailArity}`
+        );
 
         if (!this.heap.is_Closure(tailFun)) {
           throw new Error("Tail calling a non-function");
@@ -1044,7 +1080,9 @@ class RustVM {
           this.heap.heap_get_Closure_environment(tailFun)
         );
         this.PC = tailPC;
-        this.log(`TAIL_CALL: Set new environment E=${this.E} (was ${oldTailEnv}) and PC=${this.PC}`);
+        this.log(
+          `TAIL_CALL: Set new environment E=${this.E} (was ${oldTailEnv}) and PC=${this.PC}`
+        );
         break;
 
       case "RESET": // Return from function
@@ -1055,7 +1093,9 @@ class RustVM {
           const oldE = this.E;
           this.PC = this.heap.heap_get_Callframe_pc(top_frame);
           this.E = this.heap.heap_get_Callframe_environment(top_frame);
-          this.log(`RESET: Restored PC=${this.PC} (was ${oldPC}) and E=${this.E} (was ${oldE})`);
+          this.log(
+            `RESET: Restored PC=${this.PC} (was ${oldPC}) and E=${this.E} (was ${oldE})`
+          );
         } else {
           this.PC--;
           this.log(`RESET: Not a callframe, decremented PC to ${this.PC}`);
@@ -1127,6 +1167,7 @@ class RustCompiler {
   private wc: number = 0; // Write counter
   private env: string[][] = []; // Compile-time environment
   private builtins: Set<string> = new Set(["println"]);
+  private mainFunctionAddress: number | null = null;
 
   // Helper for adding instructions
   private emit(instruction: Instruction): void {
@@ -1137,11 +1178,13 @@ class RustCompiler {
   public compile(node: any): Instruction[] {
     this.instructions = [];
     this.wc = 0;
+    this.mainFunctionAddress = null;
 
     // Add builtins to environment
     this.env = [Array.from(this.builtins), []];
 
     this.compileNode(node);
+
     this.emit({ tag: "DONE" });
     return this.instructions;
   }
@@ -1149,7 +1192,7 @@ class RustCompiler {
   // Main dispatch method for compiling different node types
   private compileNode(node: any): void {
     if (node instanceof ProgContext) {
-      this.compileBlockStatement(node);
+      this.compileProgram(node);
     } else if (node instanceof ExpressionContext) {
       this.compileExpression(node);
     } else if (node instanceof VarDeclarationContext) {
@@ -1234,6 +1277,11 @@ class RustCompiler {
 
     // Record function start address
     const functionStartAddress = this.wc;
+
+    // Check if this is the main function
+    if (functionName === "main" && paramCount === 0) {
+      this.mainFunctionAddress = functionStartAddress;
+    }
 
     // Create new environment for function parameters
     const params: string[] = [];
@@ -1384,6 +1432,42 @@ class RustCompiler {
       // Remove locals from environment
       this.env.shift();
     }
+  }
+
+  // Compile a program
+  private compileProgram(node: ProgContext): void {
+    // Find local variables in block
+    const locals = this.scanForLocals(node);
+
+    // Create scope
+    this.emit({ tag: "ENTER_SCOPE", num: locals.length });
+    this.extendEnvironment(locals);
+
+    // Compile statements in block
+    let first = true;
+    for (const statement of node.statement()) {
+      if (!first) {
+        this.emit({ tag: "POP" });
+      }
+      this.compileNode(statement);
+      first = false;
+    }
+
+    // Check if main function was found and call it
+    if (this.mainFunctionAddress !== null) {
+      // Load the main function
+      this.emit({ tag: "LD", sym: "main", pos: this.lookupVariable("main")! });
+      // Call main with 0 arguments
+      this.emit({ tag: "CALL", arity: 0 });
+    } else {
+      // No main function found, emit error instruction
+      this.emit({ tag: "LDC", val: "Error: No main function found" });
+    }
+
+    // Exit scope
+    this.emit({ tag: "EXIT_SCOPE" });
+    // Remove locals from environment
+    this.env.shift();
   }
 
   // Compile a while loop
@@ -1686,6 +1770,7 @@ export class RustEvaluator extends BasicEvaluator {
     super(conductor);
     this.executionCount = 0;
     this.visitor = new RustEvaluatorVisitor();
+    globalConductor = conductor;
   }
 
   async evaluateChunk(chunk: string): Promise<void> {
@@ -1701,10 +1786,7 @@ export class RustEvaluator extends BasicEvaluator {
       const tree = parser.prog();
 
       // Evaluate the parsed tree
-      const result = this.visitor.visit(tree);
-
-      // Send the result to the REPL
-      this.conductor.sendOutput(`Result: ${JSON.stringify(result)}`);
+      this.visitor.visit(tree);
     } catch (error) {
       // Handle errors and send them to the REPL
       if (error instanceof Error) {
@@ -1729,13 +1811,11 @@ const mockConductor = new MockConductor();
 const evaluator = new RustEvaluator(mockConductor as any);
 
 evaluator.evaluateChunk(`
-            fn factorial(n: i32) -> i32 {
-                if n <= 1 {
-                    return 1;
-                }
-                n * factorial(n - 1);
-            }
-            
-            factorial(5);
-        `);
+  fn main() {
+    let x = 5;
+    let y = 10;
+    let z = x + y;
+    println!("Sum: {}", z);
+  }
+`);
 console.log(mockConductor.outputs);

@@ -250,11 +250,11 @@ describe("RustEvaluator", () => {
   it("should handle function declarations and calls", async () => {
     await evaluator.evaluateChunk(`
       fn add(a: i32, b: i32) -> i32 {
-        return a + b;
+        a + b;
       }
       
       fn multiply(x: i32, y: i32) -> i32 {
-        return x * y;
+        x * y;
       }
       
       fn main() {
@@ -272,7 +272,7 @@ describe("RustEvaluator", () => {
         let x = 5;
         let y = 10;
         let z = x + y;
-        return z;
+        z;
       }
       
       fn main() {
@@ -288,7 +288,7 @@ describe("RustEvaluator", () => {
         if n <= 1 {
           return 1;
         }
-        return n * factorial(n - 1);
+        n * factorial(n - 1);
       }
       
       fn main() {
@@ -301,7 +301,7 @@ describe("RustEvaluator", () => {
   it("should handle functions with no parameters", async () => {
     await evaluator.evaluateChunk(`
       fn get_value() -> i32 {
-        return 42;
+        42;
       }
       
       fn main() {

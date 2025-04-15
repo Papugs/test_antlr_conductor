@@ -20,9 +20,6 @@ import {
   LiteralContext,
   ArrayLiteralContext,
   WhileLoopContext,
-  ExpressionListContext,
-  ParameterListContext,
-  ParameterContext,
   MacroInvocationContext,
 } from "./parser/src/RustParser";
 import { RustVisitor } from "./parser/src/RustVisitor";

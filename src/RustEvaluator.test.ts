@@ -184,8 +184,8 @@ describe("RustEvaluator", () => {
   it("should handle while loops", async () => {
     await evaluator.evaluateChunk(`
       fn main() {
-        let i = 0;
-        while (i < 5) {
+        let mut i = 0;
+        while i < 5 {
           i = i + 1;
         }
         println!("{}", i);
@@ -331,5 +331,314 @@ describe("RustEvaluator", () => {
       }
     `);
     assert.strictEqual(mockConductor.outputs[0], "Hello, world!");
+  });
+
+  it("should handle shadowing", async () => {
+    await evaluator.evaluateChunk(`
+      fn main() {
+        let x = 5;
+        let x = 10;
+        println!("{}", x);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "10");
+  });
+
+  it("should handle mutable variables", async () => {
+    await evaluator.evaluateChunk(`
+      fn main() {
+        let mut x = 10;
+        x = 5;
+        println!("{}", x);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "15");
+  });
+
+  it("should error on mutation of immutable variables", async () => {
+    await evaluator.evaluateChunk(`
+      fn main() {
+        let x = 10;
+        x = 5;
+        println!("{}", x);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "Error: cannot assign twice to immutable variable `x`");
+  });
+
+  it("should handle compound assignment", async () => {
+    await evaluator.evaluateChunk(`
+      fn main() {
+        let x = 10;
+        x += 5;
+        println!("{}", x);
+        x -= 3;
+        println!("{}", x);
+        x *= 2;
+        println!("{}", x);
+        x /= 2;
+        println!("{}", x);
+        x %= 3;
+        println!("{}", x);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "15");
+    assert.strictEqual(mockConductor.outputs[1], "12");
+    assert.strictEqual(mockConductor.outputs[2], "24");
+    assert.strictEqual(mockConductor.outputs[3], "12");
+    assert.strictEqual(mockConductor.outputs[4], "0");
+  });
+
+  // OWNERSHIP AND BORROWING
+  it("should handle basic ownership transfer", async () => {
+    await evaluator.evaluateChunk(`
+      fn main() {
+        let s1 = vec![1, 2, 3];
+        let s2 = s1;
+        // s1 is no longer valid after ownership transfer
+        println!("{:?}", s2);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "[1,2,3]");
+  });
+
+  it("should error when using a moved value", async () => {
+    await evaluator.evaluateChunk(`
+      fn main() {
+        let s1 = vec![1, 2, 3];
+        let s2 = s1;
+        // Using s1 after it's moved should error
+        println!("{:?}", s1);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "Error: borrow of moved value: `s1`");
+  });
+
+  it("should handle immutable borrowing", async () => {
+    await evaluator.evaluateChunk(`
+      fn main() {
+        let s = vec![1, 2, 3];
+        let r = &s;
+        // Both s and r can be used
+        println!("{:?}", r);
+        println!("{:?}", s);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "[1,2,3]");
+    assert.strictEqual(mockConductor.outputs[1], "[1,2,3]");
+  });
+
+  it("should handle mutable borrowing", async () => {
+    await evaluator.evaluateChunk(`
+      fn main() {
+        let mut s = vec![1, 2, 3];
+        let r = &mut s;
+        // Modify through reference
+        *r = vec![4, 5, 6];
+        println!("{:?}", s);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "[4,5,6]");
+  });
+
+  it("should error when borrowing mutably and immutably at the same time", async () => {
+    await evaluator.evaluateChunk(`
+      fn main() {
+        let mut s = vec![1, 2, 3];
+        let r1 = &s;
+        let r2 = &mut s; // Error: cannot borrow mutably and immutably
+        println!("{:?}", *r1);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "Error: cannot borrow `s` as mutable because it is also borrowed as immutable");
+  });
+
+  it("should error when borrowing mutably more than once", async () => {
+    await evaluator.evaluateChunk(`
+      fn main() {
+        let mut s = vec![1, 2, 3];
+        let r1 = &mut s;
+        let r2 = &mut s; // Error: cannot borrow mutably more than once
+        println!("{:?}", *r1);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "Error: cannot borrow `s` as mutable more than once at a time");
+  });
+
+  it("should handle borrowing in function calls", async () => {
+    await evaluator.evaluateChunk(`
+      fn print_string(s: &Vec<i32>) {
+        println!("{:?}", *s);
+      }
+
+      fn main() {
+        let s = vec![1, 2, 3];
+        print_string(&s);
+        // s is still valid after immutable borrow
+        println!("{:?}", s);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "[1,2,3]");
+    assert.strictEqual(mockConductor.outputs[1], "[1,2,3]");
+  });
+
+  it("should handle ownership transfer in function calls", async () => {
+    await evaluator.evaluateChunk(`
+      fn take_ownership(s: Vec<i32>) {
+        println!("{:?}", s);
+      }
+
+      fn main() {
+        let s = vec![1, 2, 3];
+        take_ownership(s);
+        // s is no longer valid here
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "[1,2,3]");
+    assert.strictEqual(mockConductor.outputs[1], "[1,2,3]");
+  });
+
+  it("should error when using a value after ownership transfer in function", async () => {
+    await evaluator.evaluateChunk(`
+      fn take_ownership(s: Vec<i32>) {
+        println!("{:?}", s);
+      }
+
+      fn main() {
+        let s = vec![1, 2, 3];
+        take_ownership(s);
+        // Error: s is no longer valid
+        println!("{:?}", s);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "Error: borrow of moved value: `s`"); // should happen at compile time
+  });
+
+  // TYPING
+  it("should handle basic integer types", async () => {
+    await evaluator.evaluateChunk(`
+      fn main() {
+        let x: i32 = 42;
+        println!("{}", x);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "42");
+  });
+
+  it("should handle basic float types", async () => {
+    await evaluator.evaluateChunk(`
+      fn main() {
+        let x: f64 = 3.14;
+        println!("{}", x);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "3.14");
+  });
+
+  it("should handle basic boolean types", async () => {
+    await evaluator.evaluateChunk(`
+      fn main() {
+        let x: bool = true;
+        println!("{}", x);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "true");
+  });
+
+  it("should handle basic string types", async () => {
+    await evaluator.evaluateChunk(`
+      fn main() {
+        let x: &str = "hello";
+        println!("{}", x);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "hello");
+  });
+
+  it("should handle type inference", async () => {
+    await evaluator.evaluateChunk(`
+      fn main() {
+        let x = 42;
+        let y = 3.14;
+        let z = "hello";
+        let w = true;
+        println!("{} {} {} {}", x, y, z, w);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "42 3.14 hello true");
+  });
+
+  it("should error on type mismatch in assignment", async () => {
+    await evaluator.evaluateChunk(`
+      fn main() {
+        let x: i32 = "hello";
+        println!("{}", x);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "Error: mismatched types");
+  });
+
+  it("should handle function return types", async () => {
+    await evaluator.evaluateChunk(`
+      fn get_number() -> i32 {
+        return 42;
+      }
+
+      fn main() {
+        let x = get_number();
+        println!("{}", x);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "42");
+  });
+
+  it("should error on incorrect function return type", async () => {
+    await evaluator.evaluateChunk(`
+      fn get_number() -> i32 {
+        return "hello";
+      }
+
+      fn main() {
+        let x = get_number();
+        println!("{}", x);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "Error: mismatched types");
+  });
+
+  it("should error on incorrect function argument type", async () => {
+    await evaluator.evaluateChunk(`
+      fn add(a: i32, b: i32) -> i32 {
+        a + b;
+      }
+
+      fn main() {
+        let x = add(1, "hello");
+        println!("{}", x);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "Error: mismatched types");
+  });
+
+  it("should handle basic vector types", async () => {
+    await evaluator.evaluateChunk(`
+      fn main() {
+        let arr: Vec<i32> = vec![1, 2, 3, 4, 5];
+        println!("{:?}", arr);
+        println!("{}", arr[2]);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "[1,2,3,4,5]");
+    assert.strictEqual(mockConductor.outputs[1], "3");
+  });
+
+  it("should error on incorrect vector type", async () => {
+    await evaluator.evaluateChunk(`
+      fn main() {
+        let arr: Vec<i32> = vec![1, 2, "hello", 4, 5];
+        println!("{}", arr[2]);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "Error: mismatched types");
   });
 });

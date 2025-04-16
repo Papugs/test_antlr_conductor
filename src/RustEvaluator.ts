@@ -557,6 +557,11 @@ class RustVM {
     // Return the final value on the stack
     return this.heap.address_to_JS_value(this.peek());
   }
+  
+  private emitLoopExitValue(): void {
+    // Push undefined onto the stack so the program has a return value
+    this.push(this.heap.Undefined);
+  }  
 
   private executeInstruction(instr: Instruction): void {
     switch (instr.tag) {
@@ -773,6 +778,9 @@ class RustCompiler {
   private instructions: Instruction[] = [];
   private wc: number = 0; // Write counter
   private env: string[][] = []; // Compile-time environment
+  private breakStack: Instruction[][] = [];
+  private continueStack: number[] = [];
+
 
   // Helper for adding instructions
   private emit(instruction: Instruction): void {
@@ -832,12 +840,15 @@ class RustCompiler {
     } else if (node.whileLoop()) {
       this.compileNode(node.whileLoop()!);
     } else if (node.breakStatement()) {
-      // Break not fully implemented yet
-      this.emit({ tag: "BREAK" });
+      const breakInstr: Instruction = { tag: "GOTO", addr: -1 };
+      this.breakStack[this.breakStack.length - 1].push(breakInstr);
+      this.emit({ tag: "LDC", val: undefined });
+      this.emit(breakInstr);
     } else if (node.continueStatement()) {
-      // Continue not fully implemented yet
-      this.emit({ tag: "CONTINUE" });
-    }
+      const continueTarget = this.continueStack[this.continueStack.length - 1];
+      this.emit({ tag: "LDC", val: undefined });
+      this.emit({ tag: "GOTO", addr: continueTarget });
+    }    
   }
 
   // Compile a variable declaration
@@ -847,6 +858,9 @@ class RustCompiler {
     // Find or add variable to environment
     let pos = this.lookupVariable(identifier);
     if (!pos) {
+      if (this.env.length === 0) {
+        this.env.unshift([]);
+      }
       // Add to current scope
       this.env[0].push(identifier);
       pos = [0, this.env[0].length - 1];
@@ -1001,55 +1015,67 @@ class RustCompiler {
   private compileBlockStatement(
     node: BlockStatementContext | ProgContext
   ): void {
-    // Find local variables in block
     const locals = this.scanForLocals(node);
-
-    // Create scope
-    this.emit({ tag: "ENTER_SCOPE", num: locals.length });
-
-    // Add locals to environment
-    this.extendEnvironment(locals);
-
-    // Compile statements in block
-    let first = true;
-    for (const statement of node.statement()) {
-      if (!first) {
+  
+    // ENTER_SCOPE only for actual blocks
+    const isProg = node instanceof ProgContext;
+    if (!isProg) {
+      this.emit({ tag: "ENTER_SCOPE", num: locals.length });
+      this.extendEnvironment(locals);
+    }
+  
+    const statements = node.statement();
+    for (let i = 0; i < statements.length; i++) {
+      this.compileNode(statements[i]);
+  
+      const isLast = i === statements.length - 1;
+      if (!isLast) {
         this.emit({ tag: "POP" });
       }
-      this.compileNode(statement);
-      first = false;
     }
 
-    // Exit scope
-    this.emit({ tag: "EXIT_SCOPE" });
-
-    // Remove locals from environment
-    this.env.shift();
+    if (!isProg) {
+      this.emit({ tag: "EXIT_SCOPE" });
+      this.env.shift();
+    }
   }
 
   // Compile a while loop
   private compileWhileLoop(node: WhileLoopContext): void {
-    // Loop start address
     const loopStartAddress = this.wc;
 
+    // Leave a value on the stack
+    this.emit({ tag: "LDC", val: undefined });
+  
     // Compile condition
     this.compileNode(node.expression()!);
-
-    // Jump-on-false to exit loop
-    const jumpOnFalseInstruction: Instruction = { tag: "JOF" };
-    this.emit(jumpOnFalseInstruction);
+  
+    // Jump if false → placeholder for break target
+    const jofInstruction: Instruction = { tag: "JOF", addr: -1 };
+    this.emit(jofInstruction);
+  
+    // Push break/continue context
+    this.breakStack.push([]);
+    this.continueStack.push(loopStartAddress);
 
     // Compile loop body
     this.compileNode(node.blockStatement()!);
-
-    // Jump back to condition
+  
+    // Jump back to loop start (for condition re-check)
     this.emit({ tag: "GOTO", addr: loopStartAddress });
+  
+    // Mark loop end (break target)
+    jofInstruction.addr = this.wc;
 
-    // Set exit jump address
-    jumpOnFalseInstruction.addr = this.wc;
-
-    // Push undefined as loop result
-    this.emit({ tag: "LDC", val: undefined });
+    // Patch all breaks to jump here (after loop)
+    const breaks = this.breakStack.pop();
+    for (const instr of breaks) {
+      instr.addr = this.wc;
+    }
+  
+    // Cleanup context stacks
+    this.breakStack.pop();
+    this.continueStack.pop();
   }
 
   // Compile an expression

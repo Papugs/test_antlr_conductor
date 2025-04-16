@@ -72,6 +72,7 @@ expression
     | expression '[' expression ']'
     | expression ('(' expressionList? ')' | '()')
     | ('!'|'-') expression
+    | expression op=('+='|'-='|'*='|'/='|'%=') expression
     | expression op=('*'|'/'|'%') expression
     | expression op=('+'|'-') expression
     | expression op=('<'|'>'|'<='|'>=') expression

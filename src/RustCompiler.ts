@@ -433,7 +433,14 @@ export class RustCompiler {
         if (expr0 && child1 && expr1) {
           const op = child1.getText();
 
-          if (op === "=") {
+          if (
+            op === "=" ||
+            op === "+=" ||
+            op === "-=" ||
+            op === "*=" ||
+            op === "/=" ||
+            op === "%="
+          ) {
             // Assignment
             const identifier = expr0.getText();
             const pos = this.lookupVariable(identifier);
@@ -442,9 +449,16 @@ export class RustCompiler {
                 `cannot find value \`${identifier}\` in this scope`
               );
             }
-
-            // Compile right-hand side
-            this.compileNode(expr1);
+            
+            if (op !== "=") {
+              // Compound assignment
+              this.compileNode(expr0);
+              this.compileNode(expr1);
+              this.emit({ tag: "BINOP", sym: op.slice(0, -1) });
+            } else {
+              // Simple assignment
+              this.compileNode(expr1);
+            }
 
             // Emit assignment instruction
             this.emit({ tag: "ASSIGN", pos });

@@ -443,8 +443,15 @@ export class RustTypeChecker {
         if (expr0 && child1 && expr1) {
           const op = child1.getText();
 
-          if (op === "=") {
-            // Assignment
+          if (
+            op === "=" ||
+            op === "+=" ||
+            op === "-=" ||
+            op === "*=" ||
+            op === "/=" ||
+            op === "%="
+          ) {
+            // Assignment or compound assignment
             const identifier = expr0.getText();
             const varInfo = this.env.lookup(identifier);
 
@@ -457,8 +464,19 @@ export class RustTypeChecker {
             // Check if assignment is allowed (mutable and not borrowed)
             this.env.canAssign(identifier);
 
-            // Check right-hand side type
-            const rhsType = this.checkExpression(expr1);
+            let rhsType: RustType;
+            if (op === "=") {
+              // Simple assignment
+              // Check right-hand side type
+              rhsType = this.checkExpression(expr1);
+            } else {
+              // Compound assignment
+              rhsType = this.checkBinaryOperation(
+                varInfo.type,
+                op.slice(0, -1),
+                this.checkExpression(expr1)
+              );
+            }
 
             // Type checking for assignment
             if (

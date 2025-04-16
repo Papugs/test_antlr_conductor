@@ -100,23 +100,23 @@ export class RustEvaluator extends BasicEvaluator {
   }
 }
 
-// For quick tests
-class MockConductor {
-  outputs: string[] = [];
+// // For quick tests
+// class MockConductor {
+//   outputs: string[] = [];
 
-  sendOutput(message: string): void {
-    this.outputs.push(message);
-  }
-}
+//   sendOutput(message: string): void {
+//     this.outputs.push(message);
+//   }
+// }
 
-const mockConductor = new MockConductor();
-const evaluator = new RustEvaluator(mockConductor as any);
+// const mockConductor = new MockConductor();
+// const evaluator = new RustEvaluator(mockConductor as any);
 
-evaluator.evaluateChunk(`
-      fn main() {
-        let arr: Vec<i32> = vec![1, 2, 3, 4, 5];
-        println!("{:?}", arr);
-        println!("{}", arr[2]);
-      }
-`);
-console.log(mockConductor.outputs);
+// evaluator.evaluateChunk(`
+//       fn main() {
+//         let mut x = 1;
+//         x += "h";
+//         println!("{}", x);
+//       }
+// `);
+// console.log(mockConductor.outputs);

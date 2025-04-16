@@ -369,7 +369,7 @@ describe("RustEvaluator", () => {
   it("should handle compound assignment", async () => {
     await evaluator.evaluateChunk(`
       fn main() {
-        let x = 10;
+        let mut x = 10;
         x += 5;
         println!("{}", x);
         x -= 3;

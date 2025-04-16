@@ -253,7 +253,7 @@ export class RustTypeChecker {
     if (typeText === "i32") return { kind: RustTypeKind.Int };
     if (typeText === "f64") return { kind: RustTypeKind.Float };
     if (typeText === "bool") return { kind: RustTypeKind.Bool };
-    if (typeText === "String") return { kind: RustTypeKind.String };
+    if (typeText === "&str") return { kind: RustTypeKind.String };
     if (typeText === "()") return { kind: RustTypeKind.Unit };
 
     // Reference types
@@ -291,7 +291,7 @@ export class RustTypeChecker {
     if (typeStr === "i32") return { kind: RustTypeKind.Int };
     if (typeStr === "f64") return { kind: RustTypeKind.Float };
     if (typeStr === "bool") return { kind: RustTypeKind.Bool };
-    if (typeStr === "String") return { kind: RustTypeKind.String };
+    if (typeStr === "&str") return { kind: RustTypeKind.String };
     if (typeStr === "()") return { kind: RustTypeKind.Unit };
 
     return { kind: RustTypeKind.Unknown };
@@ -986,7 +986,7 @@ export class RustTypeChecker {
       case RustTypeKind.Bool:
         return "bool";
       case RustTypeKind.String:
-        return "String";
+        return "&str";
       case RustTypeKind.Unit:
         return "()";
       case RustTypeKind.Never:

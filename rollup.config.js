@@ -6,7 +6,7 @@ export default {
   plugins: [
     nodeResolve(),
     typescript({
-      exclude: ["**/*.test.ts", "**/*.spec.ts"],
+      exclude: ["**/*.test.ts", "**/*.spec.ts", "src/DevTest.ts"],
     }),
   ],
   input: "src/index.ts",

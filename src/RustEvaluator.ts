@@ -1165,6 +1165,7 @@ class RustCompiler {
   private env: string[][] = []; // Compile-time environment
   private builtins: Set<string> = new Set(["println"]);
   private mainFunctionAddress: number | null = null;
+  private loopStack: number[][] = []; // Stack to track loop start and end addresses
 
   // Helper for adding instructions
   private emit(instruction: Instruction): void {
@@ -1176,6 +1177,7 @@ class RustCompiler {
     this.instructions = [];
     this.wc = 0;
     this.mainFunctionAddress = null;
+    this.loopStack = [];
 
     // Add builtins to environment
     this.env = [Array.from(this.builtins), []];
@@ -1230,12 +1232,39 @@ class RustCompiler {
     } else if (node.whileLoop()) {
       this.compileNode(node.whileLoop()!);
     } else if (node.breakStatement()) {
-      // Break not fully implemented yet
-      this.emit({ tag: "BREAK" });
+      this.compileBreakStatement();
     } else if (node.continueStatement()) {
-      // Continue not fully implemented yet
-      this.emit({ tag: "CONTINUE" });
+      this.compileContinueStatement();
     }
+  }
+
+  // Compile a break statement
+  private compileBreakStatement(): void {
+    if (this.loopStack.length === 0) {
+      throw new Error("Break statement outside of loop");
+    }
+    
+    // Create a jump to the end of the current loop
+    // The actual address will be filled in when the loop is compiled
+    const jumpInstruction: Instruction = { tag: "GOTO" };
+    this.emit(jumpInstruction);
+    
+    // Add this jump instruction to the list of breaks for the current loop
+    const currentLoop = this.loopStack[this.loopStack.length - 1];
+    currentLoop.push(this.wc - 1); // Store the index of the jump instruction
+  }
+
+  // Compile a continue statement
+  private compileContinueStatement(): void {
+    if (this.loopStack.length === 0) {
+      throw new Error("Continue statement outside of loop");
+    }
+    
+    // Create a jump to the start of the current loop
+    const currentLoop = this.loopStack[this.loopStack.length - 1];
+    const loopStartAddress = currentLoop[0]; // First element is the loop start address
+    
+    this.emit({ tag: "GOTO", addr: loopStartAddress });
   }
 
   // Compile a variable declaration
@@ -1472,6 +1501,10 @@ class RustCompiler {
     // Loop start address
     const loopStartAddress = this.wc;
 
+    // Create a new loop context and push it to the stack
+    // [startAddress, breakJumpAddresses...]
+    this.loopStack.push([loopStartAddress]);
+
     // Compile condition
     this.compileNode(node.expression()!);
 
@@ -1487,6 +1520,13 @@ class RustCompiler {
 
     // Set exit jump address
     jumpOnFalseInstruction.addr = this.wc;
+
+    // Update all break statements to jump to this point
+    const currentLoop = this.loopStack.pop()!;
+    for (let i = 1; i < currentLoop.length; i++) {
+      const breakJumpIndex = currentLoop[i];
+      this.instructions[breakJumpIndex].addr = this.wc;
+    }
 
     // Push undefined as loop result
     this.emit({ tag: "LDC", val: undefined });

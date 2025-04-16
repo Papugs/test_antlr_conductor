@@ -578,6 +578,17 @@ describe("RustEvaluator", () => {
     assert.strictEqual(mockConductor.outputs[0], "Error: mismatched types");
   });
 
+  it("should error on type mismatch in mutability", async () => {
+    await evaluator.evaluateChunk(`
+      fn main() {
+        let mut x = 4;
+        x = 3.14;
+        println!("{}", x);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "Error: mismatched types");
+  });
+
   it("should handle function return types", async () => {
     await evaluator.evaluateChunk(`
       fn get_number() -> i32 {

@@ -617,6 +617,25 @@ describe("RustEvaluator", () => {
     assert.strictEqual(mockConductor.outputs[0], "Error: mismatched types: expected `i32`, found `&str`");
   });
 
+  it("should error on any incorrect return type", async () => {
+    await evaluator.evaluateChunk(`
+      fn get_number() -> i32 {
+        if true {
+          return 42;
+        } else {
+          return "hello";
+        }
+        42;
+      }
+
+      fn main() {
+        let x = get_number();
+        println!("{}", x);
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "Error: mismatched types: expected `i32`, found `&str`");
+  });
+
   it("should error on incorrect function argument type", async () => {
     await evaluator.evaluateChunk(`
       fn add(a: i32, b: i32) -> i32 {

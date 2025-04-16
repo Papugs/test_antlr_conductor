@@ -100,7 +100,6 @@ class TypeEnvironment {
 
   // Borrow a variable (immutably)
   borrow(name: string): void {
-    console.log("borrowing", name);
     const info = this.lookup(name);
     if (!info) {
       throw new Error(`cannot borrow undeclared variable \`${name}\``);
@@ -211,6 +210,7 @@ class TypeEnvironment {
 export class RustTypeChecker {
   private env: TypeEnvironment;
   private currentFunctionName: string | null = null;
+  private currentFunctionReturnType: RustType | null = null;
 
   constructor() {
     this.env = new TypeEnvironment();
@@ -225,22 +225,25 @@ export class RustTypeChecker {
   }
 
   // Type check a statement
-  checkStatement(node: StatementContext): void {
+  checkStatement(node: StatementContext): void | RustType {
     if (node.varDeclaration()) {
       this.checkVarDeclaration(node.varDeclaration()!);
     } else if (node.functionDeclaration()) {
       this.checkFunctionDeclaration(node.functionDeclaration()!);
     } else if (node.expression()) {
-      this.checkExpression(node.expression()!);
+      return this.checkExpression(node.expression()!);
     } else if (node.returnStatement()) {
       this.checkReturnStatement(node.returnStatement()!);
     } else if (node.ifStatement()) {
-      this.checkIfStatement(node.ifStatement()!);
+      return this.checkIfStatement(node.ifStatement()!);
     } else if (node.blockStatement()) {
-      this.checkBlockStatement(node.blockStatement()!);
+      return this.checkBlockStatement(node.blockStatement()!, false);
     } else if (node.whileLoop()) {
-      this.checkWhileLoop(node.whileLoop()!);
+      return this.checkWhileLoop(node.whileLoop()!);
     }
+
+    // Default return type is Unit for statements that don't produce a value
+    return { kind: RustTypeKind.Unit };
   }
 
   // Type check a variable declaration
@@ -258,7 +261,7 @@ export class RustTypeChecker {
 
     if (node.expression()) {
       const exprType = this.checkExpression(node.expression()!);
-
+      
       // If we have both a type annotation and an initializer, check compatibility
       if (node.type() && !this.typesCompatible(type, exprType)) {
         throw new Error(
@@ -275,8 +278,10 @@ export class RustTypeChecker {
 
       // Check if the right-hand side is a variable that needs to be moved
       const exprText = node.expression()!.getText();
-      if (exprText.match(/^[a-zA-Z_][a-zA-Z0-9_]*$/) && 
-          this.isNonCopyableType(exprType)) {
+      if (
+        exprText.match(/^[a-zA-Z_][a-zA-Z0-9_]*$/) &&
+        this.isNonCopyableType(exprType)
+      ) {
         // It's a simple variable reference to a non-copyable type
         this.env.markMoved(exprText);
       }
@@ -302,7 +307,7 @@ export class RustTypeChecker {
       case RustTypeKind.Reference: // References are Copy
       case RustTypeKind.String: // &str is Copy, but String is not
         return false;
-      case RustTypeKind.Array:  // Arrays of Copy types are Copy, but we'll simplify and treat all arrays as non-Copy
+      case RustTypeKind.Array: // Arrays of Copy types are Copy, but we'll simplify and treat all arrays as non-Copy
       case RustTypeKind.Function:
         return true;
       default:
@@ -394,6 +399,10 @@ export class RustTypeChecker {
     const previousFunctionName = this.currentFunctionName;
     this.currentFunctionName = functionName;
 
+    // Save the current function return type
+    const previousReturnType = this.currentFunctionReturnType;
+    this.currentFunctionReturnType = returnType;
+
     // Push a new scope for function parameters
     this.env.pushScope();
 
@@ -420,31 +429,151 @@ export class RustTypeChecker {
     functionType.paramTypes = paramTypes;
 
     // Check function body
-    this.checkBlockStatement(node.blockStatement()!);
+    const blockHasReturn = this.checkBlockStatement(
+      node.blockStatement()!,
+      true
+    );
+
+    // Verify that functions with non-unit return type have a return value on all paths
+    if (
+      returnType.kind !== RustTypeKind.Unit &&
+      !this.hasReturnInAllPaths(node.blockStatement()!)
+    ) {
+      throw new Error(
+        `not all control paths return a value in function \`${functionName}\``
+      );
+    }
 
     // Pop function parameter scope
     this.env.popScope();
 
     // Restore previous function name
     this.currentFunctionName = previousFunctionName;
+
+    // Restore previous function return type
+    this.currentFunctionReturnType = previousReturnType;
+  }
+
+  // Check if a block has a return in all control flow paths
+  hasReturnInAllPaths(node: BlockStatementContext): boolean {
+    const statements = node.statement();
+
+    // Empty block doesn't have a return
+    if (statements.length === 0) {
+      return false;
+    }
+
+    // Check if the last statement could be an implicit return
+    const lastStatement = statements[statements.length - 1];
+
+    if (lastStatement.returnStatement()) {
+      // Explicit return statement
+      return true;
+    } else if (lastStatement.expression()) {
+      // Expression statement can be an implicit return
+      return true;
+    } else if (lastStatement.ifStatement()) {
+      // If statement - check both branches
+      const ifStmt = lastStatement.ifStatement()!;
+
+      // Check if statement must have both branches for complete coverage
+      if (ifStmt.blockStatement().length > 1) {
+        // Has else branch - check both branches
+        return (
+          this.hasReturnInAllPaths(ifStmt.blockStatement(0)!) &&
+          this.hasReturnInAllPaths(ifStmt.blockStatement(1)!)
+        );
+      } else if (ifStmt.ifStatement()) {
+        // Has else-if branch
+        return (
+          this.hasReturnInAllPaths(ifStmt.blockStatement(0)!) &&
+          this.hasReturnInAllPaths(ifStmt.ifStatement()!.blockStatement(0)!)
+        );
+      } else {
+        // If without else - not all paths return
+        return false;
+      }
+    } else if (lastStatement.blockStatement()) {
+      // Block statement - check if it has a return
+      return this.hasReturnInAllPaths(lastStatement.blockStatement()!);
+    }
+
+    // Other statement types don't have implicit returns
+    return false;
   }
 
   // Type check a block statement
-  checkBlockStatement(node: BlockStatementContext): void {
+  checkBlockStatement(
+    node: BlockStatementContext,
+    isFunctionBody: boolean = false
+  ): RustType {
     // Push a new scope
     this.env.pushScope();
 
+    let lastExprType: RustType = { kind: RustTypeKind.Unit };
+    let hasExplicitReturn = false;
+
     // Check each statement in the block
-    for (const statement of node.statement()) {
-      this.checkStatement(statement);
+    const statements = node.statement();
+    for (let i = 0; i < statements.length; i++) {
+      const statement = statements[i];
+
+      // Check if this is the last statement and it's an expression (for implicit return)
+      const isLastStatement = i === statements.length - 1;
+
+      if (isLastStatement && isFunctionBody) {
+        // Last statement in a function body could be an implicit return
+        if (statement.expression()) {
+          // Expression statement (e.g., x + y)
+          lastExprType = this.checkExpression(statement.expression()!);
+        } else if (statement.ifStatement()) {
+          // If expression (e.g., if x { y } else { z })
+          lastExprType = this.checkIfStatement(statement.ifStatement()!);
+        } else if (statement.blockStatement()) {
+          // Block expression (e.g., { let x = 1; x + 2 })
+          lastExprType = this.checkBlockStatement(
+            statement.blockStatement()!,
+            false
+          );
+        } else if (statement.returnStatement()) {
+          lastExprType = this.checkReturnStatement(statement.returnStatement()!);
+        } else {
+          // Other statements don't produce values
+          this.checkStatement(statement);
+        }
+
+
+        // Validate the return type if we're in a function body
+        if (this.currentFunctionReturnType) {
+          if (
+            !this.typesCompatible(this.currentFunctionReturnType, lastExprType)
+          ) {
+            throw new Error(
+              `mismatched types: expected \`${this.typeToString(
+                this.currentFunctionReturnType
+              )}\`, found \`${this.typeToString(lastExprType)}\``
+            );
+          }
+        }
+      } else if (statement.returnStatement()) {
+        // Process the return statement (will check type compatibility)
+        return this.checkReturnStatement(statement.returnStatement()!);
+        hasExplicitReturn = true;
+      } else {
+        // Process regular statement
+        this.checkStatement(statement);
+      }
     }
 
     // Pop the scope
     this.env.popScope();
+
+    // Return the type of the block (for expression blocks)
+    return lastExprType;
   }
 
   // Type check an if statement
-  checkIfStatement(node: IfStatementContext): void {
+  checkIfStatement(node: IfStatementContext): RustType {
     // Check condition - must be boolean
     const conditionType = this.checkExpression(node.expression()!);
     if (conditionType.kind !== RustTypeKind.Bool) {
@@ -452,18 +581,31 @@ export class RustTypeChecker {
     }
 
     // Check if branch
-    this.checkBlockStatement(node.blockStatement(0)!);
+    const ifBranchType = this.checkBlockStatement(
+      node.blockStatement(0)!,
+      false
+    );
+
+    let elseBranchType: RustType = { kind: RustTypeKind.Unit };
 
     // Check else branch if it exists
     if (node.blockStatement().length > 1) {
-      this.checkBlockStatement(node.blockStatement(1)!);
+      elseBranchType = this.checkBlockStatement(node.blockStatement(1)!, false);
     } else if (node.ifStatement()) {
-      this.checkIfStatement(node.ifStatement()!);
+      elseBranchType = this.checkIfStatement(node.ifStatement()!);
     }
+
+    // If branches have different types, the result is ()
+    // If they have the same type, that becomes the expression type
+    if (this.typesCompatible(ifBranchType, elseBranchType)) {
+      return ifBranchType;
+    }
+
+    return { kind: RustTypeKind.Unit };
   }
 
   // Type check a while loop
-  checkWhileLoop(node: WhileLoopContext): void {
+  checkWhileLoop(node: WhileLoopContext): RustType {
     // Check condition - must be boolean
     const conditionType = this.checkExpression(node.expression()!);
     if (conditionType.kind !== RustTypeKind.Bool) {
@@ -471,13 +613,40 @@ export class RustTypeChecker {
     }
 
     // Check loop body
-    this.checkBlockStatement(node.blockStatement()!);
+    this.checkBlockStatement(node.blockStatement()!, false);
+
+    // While loops always return ()
+    return { kind: RustTypeKind.Unit };
   }
 
   // Type check a return statement
-  checkReturnStatement(node: ReturnStatementContext): void {
+  checkReturnStatement(node: ReturnStatementContext): RustType {
+    if (!this.currentFunctionReturnType) {
+      throw new Error("return statement outside of function body");
+    }
+
     if (node.expression()) {
-      this.checkExpression(node.expression()!);
+      const exprType = this.checkExpression(node.expression()!);
+
+      // Check if return type matches function's declared return type
+      if (!this.typesCompatible(this.currentFunctionReturnType, exprType)) {
+        throw new Error(
+          `mismatched types: expected \`${this.typeToString(
+            this.currentFunctionReturnType
+          )}\`, found \`${this.typeToString(exprType)}\``
+        );
+      }
+      return exprType;
+    } else {
+      // Empty return statement - should return ()
+      if (this.currentFunctionReturnType.kind !== RustTypeKind.Unit) {
+        throw new Error(
+          `mismatched types: expected \`${this.typeToString(
+            this.currentFunctionReturnType
+          )}\`, found \`()\``
+        );
+      }
+      return { kind: RustTypeKind.Unit };
     }
   }
 
@@ -535,11 +704,13 @@ export class RustTypeChecker {
               // Simple assignment
               // Check right-hand side type
               rhsType = this.checkExpression(expr1);
-              
+
               // Check if the right-hand side is a variable that needs to be moved
               const rhsText = expr1.getText();
-              if (rhsText.match(/^[a-zA-Z_][a-zA-Z0-9_]*$/) && 
-                  this.isNonCopyableType(rhsType)) {
+              if (
+                rhsText.match(/^[a-zA-Z_][a-zA-Z0-9_]*$/) &&
+                this.isNonCopyableType(rhsType)
+              ) {
                 // It's a simple variable reference to a non-copyable type
                 this.env.markMoved(rhsText);
               }
@@ -645,15 +816,17 @@ export class RustTypeChecker {
             // Check argument types
             for (let i = 0; i < args.length; i++) {
               const argType = this.checkExpression(args[i]);
-              
+
               // Check if argument is a variable that needs to be moved
               const argText = args[i].getText();
-              if (argText.match(/^[a-zA-Z_][a-zA-Z0-9_]*$/) && 
-                  this.isNonCopyableType(argType)) {
+              if (
+                argText.match(/^[a-zA-Z_][a-zA-Z0-9_]*$/) &&
+                this.isNonCopyableType(argType)
+              ) {
                 // It's a simple variable reference to a non-copyable type
                 this.env.markMoved(argText);
               }
-              
+
               if (
                 funcType.paramTypes &&
                 !this.typesCompatible(funcType.paramTypes[i], argType)
@@ -694,15 +867,17 @@ export class RustTypeChecker {
             // Check argument types
             for (let i = 0; i < args.length; i++) {
               const argType = this.checkExpression(args[i]);
-              
+
               // Check if argument is a variable that needs to be moved
               const argText = args[i].getText();
-              if (argText.match(/^[a-zA-Z_][a-zA-Z0-9_]*$/) && 
-                  this.isNonCopyableType(argType)) {
+              if (
+                argText.match(/^[a-zA-Z_][a-zA-Z0-9_]*$/) &&
+                this.isNonCopyableType(argType)
+              ) {
                 // It's a simple variable reference to a non-copyable type
                 this.env.markMoved(argText);
               }
-              
+
               if (
                 funcType.paramTypes &&
                 !this.typesCompatible(funcType.paramTypes[i], argType)
@@ -785,7 +960,7 @@ export class RustTypeChecker {
       if (!varInfo.initialized) {
         throw new Error(`cannot use \`${identifier}\` before initialization`);
       }
-      
+
       // Check if the variable has been moved
       this.env.checkUsable(identifier);
 
@@ -813,7 +988,7 @@ export class RustTypeChecker {
       // Check each argument
       for (const arg of args) {
         this.checkExpression(arg);
-        
+
         // Check if any argument is a variable that has been moved
         const argText = arg.getText();
         if (argText.match(/^[a-zA-Z_][a-zA-Z0-9_]*$/)) {
@@ -1041,6 +1216,7 @@ export class RustTypeChecker {
       if (expected.mutable && !actual.mutable) {
         return false;
       }
+
 
       return this.typesCompatible(
         expected.elementType || { kind: RustTypeKind.Unknown },

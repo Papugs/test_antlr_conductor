@@ -1,3 +1,4 @@
+import { GeneratedIdentifierFlags } from "typescript";
 import {
   ExpressionContext,
   ProgContext,
@@ -45,6 +46,7 @@ interface VariableInfo {
   mutablyBorrowed: boolean;
   borrowCount: number;
   initialized: boolean;
+  moved: boolean; // Track if a variable has been moved
 }
 
 class TypeEnvironment {
@@ -76,6 +78,7 @@ class TypeEnvironment {
       mutablyBorrowed: false,
       borrowCount: 0,
       initialized: false,
+      moved: false,
     });
   }
 
@@ -97,9 +100,14 @@ class TypeEnvironment {
 
   // Borrow a variable (immutably)
   borrow(name: string): void {
+    console.log("borrowing", name);
     const info = this.lookup(name);
     if (!info) {
       throw new Error(`cannot borrow undeclared variable \`${name}\``);
+    }
+
+    if (info.moved) {
+      throw new Error(`cannot borrow \`${name}\` after it has been moved`);
     }
 
     if (info.mutablyBorrowed) {
@@ -117,6 +125,10 @@ class TypeEnvironment {
     const info = this.lookup(name);
     if (!info) {
       throw new Error(`cannot mutably borrow undeclared variable \`${name}\``);
+    }
+
+    if (info.moved) {
+      throw new Error(`cannot borrow \`${name}\` after it has been moved`);
     }
 
     if (!info.mutable) {
@@ -167,6 +179,32 @@ class TypeEnvironment {
     }
 
     return true;
+  }
+
+  // Mark a variable as moved
+  markMoved(name: string): void {
+    const info = this.lookup(name);
+    if (!info) {
+      throw new Error(`cannot move undeclared variable \`${name}\``);
+    }
+
+    if (info.borrowed || info.mutablyBorrowed) {
+      throw new Error(`cannot move \`${name}\` while it is borrowed`);
+    }
+
+    info.moved = true;
+  }
+
+  // Check if a variable can be used (not moved)
+  checkUsable(name: string): void {
+    const info = this.lookup(name);
+    if (!info) {
+      throw new Error(`cannot find value \`${name}\` in this scope`);
+    }
+
+    if (info.moved) {
+      throw new Error(`borrow of moved value: \`${name}\``);
+    }
   }
 }
 
@@ -234,6 +272,14 @@ export class RustTypeChecker {
       if (!node.type()) {
         type = exprType;
       }
+
+      // Check if the right-hand side is a variable that needs to be moved
+      const exprText = node.expression()!.getText();
+      if (exprText.match(/^[a-zA-Z_][a-zA-Z0-9_]*$/) && 
+          this.isNonCopyableType(exprType)) {
+        // It's a simple variable reference to a non-copyable type
+        this.env.markMoved(exprText);
+      }
     }
 
     // Declare the variable in the current scope
@@ -242,6 +288,26 @@ export class RustTypeChecker {
     // Mark as initialized if there's an initializer
     if (node.expression()) {
       this.env.initialize(identifier);
+    }
+  }
+
+  // Check if a type is non-copyable (needs to be moved)
+  isNonCopyableType(type: RustType): boolean {
+    // In Rust, primitive types are Copy, but complex types like Vec, String, etc. are not
+    switch (type.kind) {
+      case RustTypeKind.Int:
+      case RustTypeKind.Float:
+      case RustTypeKind.Bool:
+      case RustTypeKind.Unit:
+      case RustTypeKind.Reference: // References are Copy
+      case RustTypeKind.String: // &str is Copy, but String is not
+        return false;
+      case RustTypeKind.Array:  // Arrays of Copy types are Copy, but we'll simplify and treat all arrays as non-Copy
+      case RustTypeKind.Function:
+        return true;
+      default:
+        // When in doubt, assume it's non-copyable
+        return true;
     }
   }
 
@@ -469,6 +535,14 @@ export class RustTypeChecker {
               // Simple assignment
               // Check right-hand side type
               rhsType = this.checkExpression(expr1);
+              
+              // Check if the right-hand side is a variable that needs to be moved
+              const rhsText = expr1.getText();
+              if (rhsText.match(/^[a-zA-Z_][a-zA-Z0-9_]*$/) && 
+                  this.isNonCopyableType(rhsType)) {
+                // It's a simple variable reference to a non-copyable type
+                this.env.markMoved(rhsText);
+              }
             } else {
               // Compound assignment
               rhsType = this.checkBinaryOperation(
@@ -571,6 +645,15 @@ export class RustTypeChecker {
             // Check argument types
             for (let i = 0; i < args.length; i++) {
               const argType = this.checkExpression(args[i]);
+              
+              // Check if argument is a variable that needs to be moved
+              const argText = args[i].getText();
+              if (argText.match(/^[a-zA-Z_][a-zA-Z0-9_]*$/) && 
+                  this.isNonCopyableType(argType)) {
+                // It's a simple variable reference to a non-copyable type
+                this.env.markMoved(argText);
+              }
+              
               if (
                 funcType.paramTypes &&
                 !this.typesCompatible(funcType.paramTypes[i], argType)
@@ -611,6 +694,15 @@ export class RustTypeChecker {
             // Check argument types
             for (let i = 0; i < args.length; i++) {
               const argType = this.checkExpression(args[i]);
+              
+              // Check if argument is a variable that needs to be moved
+              const argText = args[i].getText();
+              if (argText.match(/^[a-zA-Z_][a-zA-Z0-9_]*$/) && 
+                  this.isNonCopyableType(argType)) {
+                // It's a simple variable reference to a non-copyable type
+                this.env.markMoved(argText);
+              }
+              
               if (
                 funcType.paramTypes &&
                 !this.typesCompatible(funcType.paramTypes[i], argType)
@@ -693,6 +785,9 @@ export class RustTypeChecker {
       if (!varInfo.initialized) {
         throw new Error(`cannot use \`${identifier}\` before initialization`);
       }
+      
+      // Check if the variable has been moved
+      this.env.checkUsable(identifier);
 
       return varInfo.type;
     } else if (node.literal()) {
@@ -718,6 +813,13 @@ export class RustTypeChecker {
       // Check each argument
       for (const arg of args) {
         this.checkExpression(arg);
+        
+        // Check if any argument is a variable that has been moved
+        const argText = arg.getText();
+        if (argText.match(/^[a-zA-Z_][a-zA-Z0-9_]*$/)) {
+          // It's a simple variable reference
+          this.env.checkUsable(argText);
+        }
       }
 
       return { kind: RustTypeKind.Unit };

@@ -84,6 +84,8 @@ expression
 
 primary
     : macroInvocation
+    | '&' 'mut'? IDENTIFIER
+    | '*' IDENTIFIER
     | IDENTIFIER
     | literal
     | '(' expression ')'

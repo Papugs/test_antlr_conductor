@@ -13,11 +13,12 @@ const mockConductor = new MockConductor();
 const evaluator = new RustEvaluator(mockConductor as any);
 
 evaluator.evaluateChunk(`
-  fn main() {
-      let s1 = vec![1, 2, 3];
-      let s2 = s1;
-      // Using s1 after it's moved should error
-      println!("{:?}", s1);
-    }
+      fn main() {
+        let mut s = vec![1, 2, 3];
+        let r = &mut s;
+        // Modify through reference
+        *r = vec![4, 5, 6];
+        println!("{:?}", s);
+      }
 `);
 console.log(mockConductor.outputs);

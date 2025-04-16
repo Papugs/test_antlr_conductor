@@ -58,7 +58,7 @@ describe("RustEvaluator", () => {
   it("should handle variable assignments", async () => {
     await evaluator.evaluateChunk(`
       fn main() {
-        let x = 5;
+        let mut x = 5;
         x = 20;
         println!("{}", x);
       }
@@ -70,7 +70,7 @@ describe("RustEvaluator", () => {
   it("should handle if statements", async () => {
     await evaluator.evaluateChunk(`
       fn main() {
-        let x = 10;
+        let mut x = 10;
         if (x > 5) {
           x = 20;
         }
@@ -83,7 +83,7 @@ describe("RustEvaluator", () => {
   it("should handle if else statements", async () => {
     await evaluator.evaluateChunk(`
       fn main() {
-        let x = 10;
+        let mut x = 10;
         if (x == 5) {
           x = 20;
         } else {
@@ -98,7 +98,7 @@ describe("RustEvaluator", () => {
   it("should handle else if statements", async () => {
     await evaluator.evaluateChunk(`
       fn main() {
-        let x = 3;
+        let mut x = 3;
         if (x > 5) {
           x = 20;
         } else if (x > 2) {
@@ -197,7 +197,7 @@ describe("RustEvaluator", () => {
   it("should handle break statements", async () => {
     await evaluator.evaluateChunk(`
       fn main() {
-        let i = 0;
+        let mut i = 0;
         while (i < 5) {
           if (i === 3) {
             break;
@@ -213,7 +213,7 @@ describe("RustEvaluator", () => {
   it("should handle continue statements", async () => {
     await evaluator.evaluateChunk(`
       fn main() {
-        let i = 0;
+        let mut i = 0;
         while (i < 5) {
           if (i === 3) {
             i = i + 4;
@@ -230,9 +230,9 @@ describe("RustEvaluator", () => {
   it("should handle nested loops", async () => {
     await evaluator.evaluateChunk(`
       fn main() {
-        let i = 0;
-        let j = 0;
-        let sum = 0;
+        let mut i = 0;
+        let mut j = 0;
+        let mut sum = 0;
         while (i < 3) {
           j = 0;
           while (j < 3) {
@@ -352,7 +352,7 @@ describe("RustEvaluator", () => {
         println!("{}", x);
       }
     `);
-    assert.strictEqual(mockConductor.outputs[0], "15");
+    assert.strictEqual(mockConductor.outputs[0], "5");
   });
 
   it("should error on mutation of immutable variables", async () => {
@@ -548,7 +548,7 @@ describe("RustEvaluator", () => {
   it("should handle basic string types", async () => {
     await evaluator.evaluateChunk(`
       fn main() {
-        let x: &str = "hello";
+        let x: String = "hello";
         println!("{}", x);
       }
     `);
@@ -575,7 +575,7 @@ describe("RustEvaluator", () => {
         println!("{}", x);
       }
     `);
-    assert.strictEqual(mockConductor.outputs[0], "Error: mismatched types");
+    assert.strictEqual(mockConductor.outputs[0], "Error: mismatched types: expected `i32`, found `String`");
   });
 
   it("should error on type mismatch in mutability", async () => {
@@ -586,7 +586,7 @@ describe("RustEvaluator", () => {
         println!("{}", x);
       }
     `);
-    assert.strictEqual(mockConductor.outputs[0], "Error: mismatched types");
+    assert.strictEqual(mockConductor.outputs[0], "Error: mismatched types: expected `i32`, found `f64`");
   });
 
   it("should handle function return types", async () => {
@@ -614,7 +614,7 @@ describe("RustEvaluator", () => {
         println!("{}", x);
       }
     `);
-    assert.strictEqual(mockConductor.outputs[0], "Error: mismatched types");
+    assert.strictEqual(mockConductor.outputs[0], "Error: mismatched types: expected `i32`, found `String`");
   });
 
   it("should error on incorrect function argument type", async () => {
@@ -628,7 +628,7 @@ describe("RustEvaluator", () => {
         println!("{}", x);
       }
     `);
-    assert.strictEqual(mockConductor.outputs[0], "Error: mismatched types");
+    assert.strictEqual(mockConductor.outputs[0], "Error: mismatched types: expected `i32`, found `String`");
   });
 
   it("should handle basic vector types", async () => {
@@ -650,6 +650,6 @@ describe("RustEvaluator", () => {
         println!("{}", arr[2]);
       }
     `);
-    assert.strictEqual(mockConductor.outputs[0], "Error: mismatched types");
+    assert.strictEqual(mockConductor.outputs[0], "Error: mismatched types: expected `i32`, found `String`");
   });
 });

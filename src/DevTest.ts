@@ -13,11 +13,15 @@ const mockConductor = new MockConductor();
 const evaluator = new RustEvaluator(mockConductor as any);
 
 evaluator.evaluateChunk(`
-      fn main() {
-        let mut s = vec![1, 2, 3];
-        let r1 = &s;
-        let r2 = &mut s; // Error: cannot borrow mutably and immutably
-        println!("{:?}", r1);
-      }
+fn main() {
+    let x = 10;
+    {
+        let x = 20;
+        {
+            let x = x + 1; // Should be 21 (from inner scope)
+            println!("{}", x);
+        }
+    }
+}
 `);
 console.log(mockConductor.outputs);

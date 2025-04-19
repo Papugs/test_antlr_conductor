@@ -351,6 +351,32 @@ describe("RustEvaluator", () => {
     `);
     assert.strictEqual(mockConductor.outputs[0], "10");
   });
+  
+  it("should handle deep shadowing", async () => {
+    await evaluator.evaluateChunk(`
+      fn main() {
+        let y = 5;
+        let x = 10;
+        let z = 20;
+        {
+          let y = 10;
+          let x = 20;
+          let z = 30;
+          {
+              let y = 15;
+              let x = x + 1; // Should be 21 (from inner scope)
+              let z = z + 1; // Should be 31 (from inner scope)
+              println!("{}", x);
+              println!("{}", y);
+              println!("{}", z);
+          }
+        }
+      }
+    `);
+    assert.strictEqual(mockConductor.outputs[0], "21");
+    assert.strictEqual(mockConductor.outputs[1], "15");
+    assert.strictEqual(mockConductor.outputs[2], "31");
+  });
 
   it("should handle mutable variables", async () => {
     await evaluator.evaluateChunk(`

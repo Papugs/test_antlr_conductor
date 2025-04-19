@@ -145,8 +145,14 @@ export class RustCompiler {
         return;
       }
 
+      // Remove the reference from the environment to avoid premature shadowing
+      this.env[0].splice(pos[1], 1);
+
       // Compile the initializer expression
       this.compileNode(node.expression()!);
+
+      // Replace the reference back in the environment
+      this.env[0].splice(pos[1], 0, identifier);
 
       // Assign the value to the variable
       this.emit({ tag: "ASSIGN", pos });
@@ -296,15 +302,15 @@ export class RustCompiler {
   private compileBlockStatement(
     node: BlockStatementContext | ProgContext
   ): void {
-    // Find local variables in block
+    // Get the total count of local variables for scope creation
     const locals = this.scanForLocals(node);
 
-    // Create scope
+    // Create scope with the right size but don't add variables to environment yet
     if (locals.length > 0) {
       this.emit({ tag: "ENTER_SCOPE", num: locals.length });
-
-      // Add locals to environment
-      this.extendEnvironment(locals);
+      
+      // Create an empty frame for this scope but don't populate it with variables yet
+      this.env.unshift([]);
     }
 
     // Compile statements in block
@@ -313,6 +319,26 @@ export class RustCompiler {
       if (!first) {
         this.emit({ tag: "POP" });
       }
+      
+      // If this is a variable declaration, add it to the environment before compiling it
+      if (statement.varDeclaration()) {
+        const varDecl = statement.varDeclaration()!;
+        const identifier = varDecl.IDENTIFIER()!.getText();
+        
+        // Add the variable to the current scope (top of the environment stack)
+        if (this.env.length > 0) {
+          this.env[0].push(identifier);
+        }
+      } else if (statement.functionDeclaration()) {
+        const funcDecl = statement.functionDeclaration()!;
+        const identifier = funcDecl.IDENTIFIER()!.getText();
+        
+        // Add the function to the current scope
+        if (this.env.length > 0) {
+          this.env[0].push(identifier);
+        }
+      }
+      
       this.compileNode(statement);
       first = false;
     }
@@ -328,12 +354,14 @@ export class RustCompiler {
 
   // Compile a program
   private compileProgram(node: ProgContext): void {
-    // Find local variables in block
+    // Get the total count of local variables for scope creation
     const locals = this.scanForLocals(node);
 
     // Create scope
     this.emit({ tag: "ENTER_SCOPE", num: locals.length });
-    this.extendEnvironment(locals);
+    
+    // Create an empty frame for this scope but don't populate it with variables yet
+    this.env.unshift([]);
 
     // Compile statements in block
     let first = true;
@@ -341,6 +369,22 @@ export class RustCompiler {
       if (!first) {
         this.emit({ tag: "POP" });
       }
+      
+      // If this is a variable declaration, add it to the environment before compiling it
+      if (statement.varDeclaration()) {
+        const varDecl = statement.varDeclaration()!;
+        const identifier = varDecl.IDENTIFIER()!.getText();
+        
+        // Add the variable to the current scope
+        this.env[0].push(identifier);
+      } else if (statement.functionDeclaration()) {
+        const funcDecl = statement.functionDeclaration()!;
+        const identifier = funcDecl.IDENTIFIER()!.getText();
+        
+        // Add the function to the current scope
+        this.env[0].push(identifier);
+      }
+      
       this.compileNode(statement);
       first = false;
     }

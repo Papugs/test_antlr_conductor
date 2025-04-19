@@ -13,17 +13,8 @@ const mockConductor = new MockConductor();
 const evaluator = new RustEvaluator(mockConductor as any);
 
 evaluator.evaluateChunk(`
-      fn get_number() -> i32 {
-        if true {
-          return 42;
-        } else {
-          return 43;
-        }
-        42;
-      }
-
       fn main() {
-        let x = get_number();
+        let x: &str = "hello";
         println!("{}", x);
       }
 `);

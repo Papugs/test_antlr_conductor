@@ -19,6 +19,7 @@ export class RustCompiler {
   private instructions: Instruction[] = [];
   private wc: number = 0; // Write counter
   private env: string[][] = []; // Compile-time environment
+  private references: Map<string, string> = new Map();
   private builtins: Set<string> = new Set(["println"]);
   private mainFunctionAddress: number | null = null;
   private loopStack: number[][] = []; // Stack to track loop start and end addresses
@@ -126,6 +127,7 @@ export class RustCompiler {
   // Compile a variable declaration
   private compileVarDeclaration(node: VarDeclarationContext): void {
     const identifier = node.IDENTIFIER()!.getText();
+    const isReference = node.expression()?.getText().startsWith("&");
 
     // Find or add variable to environment
     let pos = this.lookupVariable(identifier);
@@ -136,8 +138,16 @@ export class RustCompiler {
     }
 
     if (node.expression()) {
+      // If this is a reference, store the referenced variable name
+      if (isReference) {
+        const referencedVar = node.expression()!.primary()!.IDENTIFIER()!.getText();
+        this.references.set(identifier, referencedVar);
+        return;
+      }
+
       // Compile the initializer expression
       this.compileNode(node.expression()!);
+
       // Assign the value to the variable
       this.emit({ tag: "ASSIGN", pos });
     } else {
@@ -442,11 +452,24 @@ export class RustCompiler {
             op === "%="
           ) {
             // Assignment
-            const identifier = expr0.getText();
-            const pos = this.lookupVariable(identifier);
+            let targetText = expr0.getText();
+            let isDereference = false;
+            
+            if (targetText.startsWith("*")) {
+              isDereference = true;
+              targetText = targetText.substring(1); // Remove the * operator
+            }
+
+            let pos: [number, number] | null = null;
+            if (isDereference) {
+              pos = this.dereferenceVariable(targetText);
+            } else {
+              pos = this.lookupVariable(targetText);
+            }
+            
             if (!pos) {
               throw new Error(
-                `cannot find value \`${identifier}\` in this scope`
+                `cannot find value \`${targetText}\` in this scope`
               );
             }
             
@@ -538,7 +561,10 @@ export class RustCompiler {
     } else if (node.IDENTIFIER()) {
       // Variable reference
       const identifier = node.IDENTIFIER()!.getText();
-      const pos = this.lookupVariable(identifier);
+      let pos = this.dereferenceVariable(identifier); // Auto-dereferencing
+      if (!pos) {
+        pos = this.lookupVariable(identifier);
+      }
       if (!pos) {
         throw new Error(`Variable ${identifier} not declared`);
       }
@@ -607,6 +633,14 @@ export class RustCompiler {
       }
     }
     return null;
+  }
+
+  private dereferenceVariable(name: string): [number, number] | null {
+    const ref = this.references.get(name);
+    if (!ref) {
+      return null;
+    }
+    return this.lookupVariable(ref);
   }
 
   // Scan for variable declarations in a block

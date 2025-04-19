@@ -143,6 +143,7 @@ class TypeEnvironment {
     }
 
     info.mutablyBorrowed = true;
+    info.borrowCount++; // Increment borrow count for mutable borrows too
   }
 
   // Release a borrow
@@ -687,23 +688,112 @@ export class RustTypeChecker {
             op === "%="
           ) {
             // Assignment or compound assignment
-            const identifier = expr0.getText();
-            const varInfo = this.env.lookup(identifier);
-
-            if (!varInfo) {
-              throw new Error(
-                `cannot find value \`${identifier}\` in this scope`
-              );
+            let targetText = expr0.getText();
+            let isDereference = false;
+            
+            // Check if we're dereferencing (assigning through a mutable reference)
+            if (targetText.startsWith("*")) {
+              isDereference = true;
+              targetText = targetText.substring(1); // Remove the * operator
             }
 
-            // Check if assignment is allowed (mutable and not borrowed)
-            this.env.canAssign(identifier);
+            // For regular variable assignment
+            if (!isDereference) {
+              const varInfo = this.env.lookup(targetText);
 
-            let rhsType: RustType;
-            if (op === "=") {
-              // Simple assignment
+              if (!varInfo) {
+                throw new Error(
+                  `cannot find value \`${targetText}\` in this scope`
+                );
+              }
+
+              // Check if assignment is allowed (mutable and not borrowed)
+              this.env.canAssign(targetText);
+
+              let rhsType: RustType;
+              if (op === "=") {
+                // Simple assignment
+                // Check right-hand side type
+                rhsType = this.checkExpression(expr1);
+
+                // Check if the right-hand side is a variable that needs to be moved
+                const rhsText = expr1.getText();
+                if (
+                  rhsText.match(/^[a-zA-Z_][a-zA-Z0-9_]*$/) &&
+                  this.isNonCopyableType(rhsType)
+                ) {
+                  // It's a simple variable reference to a non-copyable type
+                  this.env.markMoved(rhsText);
+                }
+              } else {
+                // Compound assignment
+                rhsType = this.checkBinaryOperation(
+                  varInfo.type,
+                  op.slice(0, -1),
+                  this.checkExpression(expr1)
+                );
+              }
+
+              // Type checking for assignment
+              if (
+                varInfo.type.kind !== RustTypeKind.Unknown &&
+                !this.typesCompatible(varInfo.type, rhsType)
+              ) {
+                throw new Error(
+                  `mismatched types: expected \`${this.typeToString(
+                    varInfo.type
+                  )}\`, found \`${this.typeToString(rhsType)}\``
+                );
+              }
+
+              // If variable type was unknown, update it
+              if (varInfo.type.kind === RustTypeKind.Unknown) {
+                varInfo.type = rhsType;
+              }
+
+              // Mark as initialized
+              this.env.initialize(targetText);
+
+              return varInfo.type;
+            } else {
+              // Handle dereference assignment (*ref = value)
+              const refVarInfo = this.env.lookup(targetText);
+
+              if (!refVarInfo) {
+                throw new Error(
+                  `cannot find value \`${targetText}\` in this scope`
+                );
+              }
+
+              // Check that it's a reference type
+              if (refVarInfo.type.kind !== RustTypeKind.Reference) {
+                throw new Error(
+                  `cannot dereference non-reference type \`${this.typeToString(refVarInfo.type)}\``
+                );
+              }
+
+              // Check if it's a mutable reference
+              if (!refVarInfo.type.mutable) {
+                throw new Error(
+                  `cannot assign through a immutable reference \`${targetText}\``
+                );
+              }
+
               // Check right-hand side type
-              rhsType = this.checkExpression(expr1);
+              const rhsType = this.checkExpression(expr1);
+              const targetType = refVarInfo.type.elementType || { kind: RustTypeKind.Unknown };
+
+              // Type checking for assignment through dereference
+              if (
+                targetType.kind !== RustTypeKind.Unknown &&
+                !this.typesCompatible(targetType, rhsType)
+              ) {
+                throw new Error(
+                  `mismatched types: expected \`${this.typeToString(
+                    targetType
+                  )}\`, found \`${this.typeToString(rhsType)}\``
+                );
+              }
 
               // Check if the right-hand side is a variable that needs to be moved
               const rhsText = expr1.getText();
@@ -714,36 +804,9 @@ export class RustTypeChecker {
                 // It's a simple variable reference to a non-copyable type
                 this.env.markMoved(rhsText);
               }
-            } else {
-              // Compound assignment
-              rhsType = this.checkBinaryOperation(
-                varInfo.type,
-                op.slice(0, -1),
-                this.checkExpression(expr1)
-              );
+
+              return targetType;
             }
-
-            // Type checking for assignment
-            if (
-              varInfo.type.kind !== RustTypeKind.Unknown &&
-              !this.typesCompatible(varInfo.type, rhsType)
-            ) {
-              throw new Error(
-                `mismatched types: expected \`${this.typeToString(
-                  varInfo.type
-                )}\`, found \`${this.typeToString(rhsType)}\``
-              );
-            }
-
-            // If variable type was unknown, update it
-            if (varInfo.type.kind === RustTypeKind.Unknown) {
-              varInfo.type = rhsType;
-            }
-
-            // Mark as initialized
-            this.env.initialize(identifier);
-
-            return varInfo.type;
           } else {
             // Binary operation
             const leftType = this.checkExpression(expr0);
@@ -963,7 +1026,14 @@ export class RustTypeChecker {
 
       // Check if the variable has been moved
       this.env.checkUsable(identifier);
-
+      
+      if (node.getText().startsWith("&")) {
+        return {
+          kind: RustTypeKind.Reference,
+          mutable: node.getText().startsWith("&mut"),
+          elementType: varInfo.type,
+        };
+      }
       return varInfo.type;
     } else if (node.literal()) {
       return this.checkLiteral(node.literal()!);

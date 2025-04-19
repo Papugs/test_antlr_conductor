@@ -1,4 +1,3 @@
-import { GeneratedIdentifierFlags } from "typescript";
 import {
   ExpressionContext,
   ProgContext,
@@ -100,6 +99,7 @@ class TypeEnvironment {
 
   // Borrow a variable (immutably)
   borrow(name: string): void {
+    console.log("borrow", name);
     const info = this.lookup(name);
     if (!info) {
       throw new Error(`cannot borrow undeclared variable \`${name}\``);
@@ -111,7 +111,7 @@ class TypeEnvironment {
 
     if (info.mutablyBorrowed) {
       throw new Error(
-        `cannot borrow \`${name}\` as immutable because it is already borrowed as mutable`
+        `cannot borrow \`${name}\` as immutable because it is also borrowed as mutable`
       );
     }
 
@@ -121,6 +121,7 @@ class TypeEnvironment {
 
   // Borrow a variable mutably
   borrowMut(name: string): void {
+    console.log("borrowMut", name);
     const info = this.lookup(name);
     if (!info) {
       throw new Error(`cannot mutably borrow undeclared variable \`${name}\``);
@@ -136,9 +137,15 @@ class TypeEnvironment {
       );
     }
 
-    if (info.borrowed || info.mutablyBorrowed) {
+    if (info.borrowed) {
       throw new Error(
-        `cannot borrow \`${name}\` as mutable because it is already borrowed`
+        `cannot borrow \`${name}\` as mutable because it is also borrowed as immutable`
+      );
+    }
+
+    if (info.mutablyBorrowed) {
+      throw new Error(
+        `cannot borrow \`${name}\` as mutable more than once at a time`
       );
     }
 
@@ -1028,9 +1035,15 @@ export class RustTypeChecker {
       this.env.checkUsable(identifier);
       
       if (node.getText().startsWith("&")) {
+        const mutable = node.getText().startsWith("&mut");
+        if (mutable) {
+          this.env.borrowMut(identifier);
+        } else {
+          this.env.borrow(identifier);
+        }
         return {
           kind: RustTypeKind.Reference,
-          mutable: node.getText().startsWith("&mut"),
+          mutable,
           elementType: varInfo.type,
         };
       }

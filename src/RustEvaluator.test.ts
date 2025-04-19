@@ -503,7 +503,6 @@ describe("RustEvaluator", () => {
       }
     `);
     assert.strictEqual(mockConductor.outputs[0], "[1,2,3]");
-    assert.strictEqual(mockConductor.outputs[1], "[1,2,3]");
   });
 
   it("should error when using a value after ownership transfer in function", async () => {

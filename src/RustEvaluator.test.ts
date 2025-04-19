@@ -501,19 +501,19 @@ describe("RustEvaluator", () => {
 
   it("should handle borrowing in function calls", async () => {
     await evaluator.evaluateChunk(`
-      fn print_string(s: &Vec<i32>) {
-        println!("{:?}", *s);
+      fn double(n: &i32) -> i32 {
+          return *n * 2;
       }
 
       fn main() {
-        let s = vec![1, 2, 3];
-        print_string(&s);
-        // s is still valid after immutable borrow
-        println!("{:?}", s);
+          let x = 5;
+          let y = double(&x);
+          println!("{}", y);
+          println!("{}", x); // x should not be changed
       }
     `);
-    assert.strictEqual(mockConductor.outputs[0], "[1,2,3]");
-    assert.strictEqual(mockConductor.outputs[1], "[1,2,3]");
+    assert.strictEqual(mockConductor.outputs[0], "10");
+    assert.strictEqual(mockConductor.outputs[1], "5");
   });
 
   it("should handle ownership transfer in function calls", async () => {

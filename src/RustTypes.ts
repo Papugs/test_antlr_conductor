@@ -99,7 +99,6 @@ class TypeEnvironment {
 
   // Borrow a variable (immutably)
   borrow(name: string): void {
-    console.log("borrow", name);
     const info = this.lookup(name);
     if (!info) {
       throw new Error(`cannot borrow undeclared variable \`${name}\``);
@@ -121,7 +120,6 @@ class TypeEnvironment {
 
   // Borrow a variable mutably
   borrowMut(name: string): void {
-    console.log("borrowMut", name);
     const info = this.lookup(name);
     if (!info) {
       throw new Error(`cannot mutably borrow undeclared variable \`${name}\``);
@@ -1046,6 +1044,9 @@ export class RustTypeChecker {
           mutable,
           elementType: varInfo.type,
         };
+      } else if (node.getText().startsWith("*")) {
+        // Dereference
+        return varInfo.type.elementType || { kind: RustTypeKind.Unknown };
       }
       return varInfo.type;
     } else if (node.literal()) {

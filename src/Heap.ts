@@ -28,6 +28,9 @@ export class Heap {
   // String storage - maps heap addresses to JS strings
   private string_table: Map<number, string> = new Map();
 
+  // Reference counting
+  private refCounts: Map<number, number>;
+
   // Special canonical values
   public False: number;
   public True: number;
@@ -39,6 +42,7 @@ export class Heap {
     this.heap_size = heapsize_words;
     const data = new ArrayBuffer(heapsize_words * this.word_size);
     this.heap = new DataView(data);
+    this.refCounts = new Map<number, number>();
     this.log("Initializing heap with size:", heapsize_words, "words");
     this.initializeFreeList();
     this.allocateLiteralValues();
@@ -129,6 +133,7 @@ export class Heap {
   ): void {
     this.log(`Setting child ${child_index} of address ${address} to: ${value}`);
     this.heap_set(address + 1 + child_index, value);
+    this.incRef(value);
   }
 
   public heap_get_tag(address: number): number {
@@ -252,6 +257,7 @@ export class Heap {
     this.log(`Allocating Frame with ${number_of_values} values`);
     const address = this.heap_allocate(FRAME_TAG, number_of_values + 1);
     this.log(`  Frame allocated at address: ${address}`);
+    this.refCounts.set(address, 1);
     return address;
   }
 
@@ -259,6 +265,8 @@ export class Heap {
     this.log(`Allocating Environment with ${number_of_frames} frames`);
     const address = this.heap_allocate(ENVIRONMENT_TAG, number_of_frames + 1);
     this.log(`  Environment allocated at address: ${address}`);
+    this.refCounts.set(address, 1);
+    this.incRef(address);
     return address;
   }
 
@@ -280,6 +288,7 @@ export class Heap {
     }
     this.log(`  Adding new frame at position ${i}: ${frame_address}`);
     this.heap_set_child(new_env_address, i, frame_address);
+    this.incRef(frame_address);
     return new_env_address;
   }
 
@@ -319,6 +328,8 @@ export class Heap {
     this.heap_set_byte_at_offset(address, 1, arity);
     this.heap_set_2_bytes_at_offset(address, 2, pc);
     this.heap_set_child(address, 0, env);
+    this.refCounts.set(address, 1);
+    this.incRef(env);
     return address;
   }
 
@@ -351,6 +362,7 @@ export class Heap {
     const address = this.heap_allocate(BLOCKFRAME_TAG, 2);
     this.log(`  Blockframe allocated at address: ${address}`);
     this.heap_set_child(address, 0, env);
+    this.refCounts.set(address, 1);
     return address;
   }
 
@@ -372,6 +384,8 @@ export class Heap {
     this.log(`  Callframe allocated at address: ${address}`);
     this.heap_set_2_bytes_at_offset(address, 2, pc);
     this.heap_set_child(address, 0, env);
+    this.refCounts.set(address, 1);
+    this.incRef(env);
     return address;
   }
 
@@ -415,6 +429,7 @@ export class Heap {
     const address = this.heap_allocate(BUILTIN_TAG, 1);
     this.log(`  Builtin allocated at address: ${address}`);
     this.heap_set(address + 1, id);
+    this.refCounts.set(address, 1);
     return address;
   }
 
@@ -468,7 +483,7 @@ export class Heap {
     for (let i = 0; i < size; i++) {
       this.heap_set_child(array_address, i + 1, this.Undefined);
     }
-
+    this.refCounts.set(array_address, 1);
     return array_address;
   }
 
@@ -501,6 +516,7 @@ export class Heap {
     index: number,
     value: number
   ): void {
+    this.decRef(this.heap_get_Array_element(address, index));
     if (!this.is_Array(address)) {
       throw new Error(`Address ${address} is not an array`);
     }
@@ -512,6 +528,7 @@ export class Heap {
 
     this.log(`Setting Array[${index}] of ${address} to: ${value}`);
     this.heap_set_child(address, index + 1, value);
+    this.incRef(value);
   }
 
   // Conversions between JS values and heap addresses
@@ -573,8 +590,61 @@ export class Heap {
       this.log(`ERROR: ${error}`);
       throw new Error(error);
     }
-
+    this.refCounts.set(address, 1);
     return address;
+  }
+
+  incRef(address: number): void {
+    if (address <= 0) return; 
+    
+    const count = this.refCounts.get(address) || 0;
+    this.refCounts.set(address, count + 1);
+    
+    if (Globals.DEBUG) {
+      console.log(`Incremented ref count for address ${address} to ${count + 1}`);
+    }
+  }
+
+  decRef(address: number): void {
+    if (address <= 0) return; 
+    const count = this.refCounts.get(address) || 0;
+    if (count <= 0) return;
+    this.refCounts.set(address, count - 1);
+    if (Globals.DEBUG) {
+      console.log(`Decremented ref count for address ${address} to ${count - 1}`);
+    }
+    if (count - 1 === 0) {
+      this.collectObject(address);
+    }
+  }
+
+  private collectObject(address: number): void {
+    if (Globals.DEBUG) {
+      console.log(`[Heap] Collecting object at address ${address}`);
+    }
+    
+    const object = this.heap[address];
+    if (!object) return;
+    
+    if (object.tag === "Array") {
+      for (let i = 0; i < object.elements.length; i++) {
+        this.decRef(object.elements[i]);
+      }
+    } else if (object.tag === "Closure") {
+      this.decRef(object.environment);
+    } else if (object.tag === "Environment") {
+      this.decRef(object.frame);
+      this.decRef(object.parent);
+    } else if (object.tag === "Frame") {
+      for (let i = 0; i < object.size; i++) {
+        this.decRef(object.slots[i]);
+      }
+    } else if (object.tag === "Callframe") {
+      this.decRef(object.environment);
+    } else if (object.tag === "Blockframe") {
+      this.decRef(object.environment);
+    }
+    this.heap[address] = { tag: "Freed" };
   }
 
   // Dump heap state for debugging

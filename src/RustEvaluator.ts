@@ -62,6 +62,13 @@ class RustEvaluatorVisitor
   protected aggregateResult(aggregate: any, nextResult: any): any {
     return nextResult;
   }
+  
+  // Garbage collection
+  public cleanUp(): void {
+    if (this.vm) {
+      this.vm.cleanup();
+    }
+  }
 }
 
 export class RustEvaluator extends BasicEvaluator {
@@ -96,6 +103,13 @@ export class RustEvaluator extends BasicEvaluator {
       } else {
         this.conductor.sendOutput(`Error: ${String(error)}`);
       }
+    }
+  }
+
+  // Garbage collection
+  public cleanUp(): void {
+    if (this.visitor) {
+      this.visitor.cleanUp();
     }
   }
 }

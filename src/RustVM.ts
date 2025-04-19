@@ -130,6 +130,7 @@ export class RustVM {
   // Stack operations
   private push(value: number): void {
     this.OS.push(value);
+    this.heap.incRef(value);
     this.log(`Push: ${value}, stack size: ${this.OS.length}`);
   }
 
@@ -139,6 +140,7 @@ export class RustVM {
     }
     const value = this.OS.pop()!;
     this.log(`Pop: ${value}, stack size: ${this.OS.length}`);
+    this.heap.decRef(value);
     return value;
   }
 
@@ -151,22 +153,47 @@ export class RustVM {
     return value;
   }
 
+  // Reference counting
+  public cleanup(): void {
+    this.log("Cleaning up VM resources");
+    
+    // Clean up operand stack
+    while (this.OS.length > 0) {
+      const value = this.OS.pop()!;
+      this.heap.decRef(value);
+    }
+    
+    // Clean up return stack
+    while (this.RTS.length > 0) {
+      const frame = this.RTS.pop()!;
+      this.heap.decRef(frame);
+    }
+    
+    // Clean up environment
+    this.heap.decRef(this.E);
+  }
+
   // VM execution
   public run(): any {
     this.log("Starting VM execution");
-    while (
-      this.PC < this.instructions.length &&
-      this.instructions[this.PC].tag !== "DONE"
-    ) {
-      const instr = this.instructions[this.PC++];
-      this.log(`Executing instruction at PC=${this.PC - 1}: ${instr.tag}`);
-      this.executeInstruction(instr);
-    }
+    try {
+      while (
+        this.PC < this.instructions.length &&
+        this.instructions[this.PC].tag !== "DONE"
+      ) {
+        const instr = this.instructions[this.PC++];
+        this.log(`Executing instruction at PC=${this.PC - 1}: ${instr.tag}`);
+        this.executeInstruction(instr);
+      }
 
-    // Return the final value on the stack
-    const finalValue = this.heap.address_to_JS_value(this.peek());
-    this.log(`Execution completed. Final value: ${finalValue}`);
-    return finalValue;
+      // Return the final value on the stack
+      const finalValueAddress = this.peek();
+      const finalValue = this.heap.address_to_JS_value(finalValueAddress);
+      this.log(`Execution completed. Final value: ${finalValue}`);
+      return finalValue;
+    } finally {
+      this.cleanup();
+    }
   }
 
   private executeInstruction(instr: Instruction): void {
@@ -185,11 +212,13 @@ export class RustVM {
           throw new Error(`Variable ${instr.sym} is unassigned`);
         }
         this.push(val);
+        this.heap.incRef(val); // Increment reference count
         break;
 
       case "ASSIGN": // Assign to variable
         this.log(`ASSIGN: Assigning to variable at position ${instr.pos}`);
         this.heap.heap_set_Environment_value(this.E, instr.pos!, this.peek());
+        this.heap.decRef(this.peek()); // Decrement reference count
         break;
 
       case "POP": // Pop top value from stack
@@ -312,6 +341,7 @@ export class RustVM {
         for (let i = 0; i < instr.num!; i++) {
           this.heap.heap_set_child(frame_address, i, this.heap.Unassigned);
         }
+        this.heap.decRef(frame_address); // Decrement reference count for the frame
         break;
 
       case "EXIT_SCOPE": // Exit current scope
@@ -321,6 +351,8 @@ export class RustVM {
         this.log(
           `EXIT_SCOPE: Restored environment from E=${oldE} to E=${this.E}`
         );
+        this.heap.decRef(oldE); // Decrement reference count for the old environment
+        this.heap.decRef(this.E); // Decrement reference count for the new environment
         break;
 
       case "LDF": // Load function (create closure)
@@ -348,9 +380,12 @@ export class RustVM {
           // Collect arguments from stack
           const args = [];
           for (let i = arity - 1; i >= 0; i--) {
-            args.unshift(this.heap.address_to_JS_value(this.pop()) as never);
+            const arg = this.pop();
+            args.unshift(this.heap.address_to_JS_value(arg) as never);
+            this.heap.decRef(arg); // Decrement reference count for each argument
           }
-          this.pop(); // Remove function reference
+          const funcRef = this.pop(); // Remove function reference
+          this.heap.decRef(funcRef); // Decrement reference count for the function
           const builtin_id = this.heap.heap_get_Builtin_id(fun);
           this.log(
             `CALL: Executing builtin with ID ${builtin_id}, args: ${JSON.stringify(
@@ -374,9 +409,10 @@ export class RustVM {
           const arg = this.pop();
           this.log(`CALL: Setting argument ${i} to ${arg}`);
           this.heap.heap_set_child(new_frame, i, arg);
+          this.heap.decRef(arg); // Decrement reference count for each argument
         }
 
-        this.pop(); // pop function
+        const funcRef = this.pop(); // pop function
         this.log(`CALL: Popped function reference`);
 
         // Save current state for return
@@ -393,6 +429,11 @@ export class RustVM {
           this.heap.heap_get_Closure_environment(fun)
         );
         this.PC = new_PC;
+
+        this.heap.decRef(funcRef); // Decrement reference count for the function
+        this.heap.decRef(callframe); // Decrement reference count for the call frame
+        this.heap.decRef(new_frame); // Decrement reference count for the new frame
+
         this.log(
           `CALL: Set new environment E=${this.E} (was ${oldEnv}) and PC=${this.PC}`
         );
@@ -437,11 +478,13 @@ export class RustVM {
 
       case "RESET": // Return from function
         this.log("RESET: Returning from function");
+        const returnValue = this.peek(); // reference to the return value
         const top_frame = this.RTS.pop()!;
         if (this.heap.is_Callframe(top_frame)) {
           const oldPC = this.PC;
           const oldE = this.E;
           this.PC = this.heap.heap_get_Callframe_pc(top_frame);
+          this.heap.decRef(this.E); // Decrement reference count for old environment
           this.E = this.heap.heap_get_Callframe_environment(top_frame);
           this.log(
             `RESET: Restored PC=${this.PC} (was ${oldPC}) and E=${this.E} (was ${oldE})`
@@ -450,6 +493,7 @@ export class RustVM {
           this.PC--;
           this.log(`RESET: Not a callframe, decremented PC to ${this.PC}`);
         }
+        this.heap.decRef(top_frame); // Decrement reference count for the frame
         break;
 
       case "DONE": // End of program
@@ -467,10 +511,12 @@ export class RustVM {
           const element = this.pop();
           this.log(`ARRAY: Setting element ${i} to ${element}`);
           this.heap.heap_set_Array_element(arrayAddress, i, element);
+          this.heap.decRef(element)
         }
 
         // Push array address to stack
         this.push(arrayAddress);
+        this.heap.decRef(arrayAddress);
         break;
 
       case "ARRAY_ACCESS": // Access array element
@@ -481,12 +527,16 @@ export class RustVM {
 
         // Check if array is actually an array
         if (!this.heap.is_Array(array)) {
+          this.heap.decRef(index);
+          this.heap.decRef(array);
           throw new Error("cannot use array access on non-array value");
         }
 
         // Get the index value
         const indexValue = this.heap.address_to_JS_value(index);
         if (typeof indexValue !== "number" || !Number.isInteger(indexValue)) {
+          this.heap.decRef(index);
+          this.heap.decRef(array);
           throw new Error(
             `Array index must be an integer, got ${typeof indexValue}`
           );
@@ -497,7 +547,13 @@ export class RustVM {
           const element = this.heap.heap_get_Array_element(array, indexValue);
           this.log(`ARRAY_ACCESS: Retrieved element ${indexValue}: ${element}`);
           this.push(element);
+          this.heap.incRef(element); // Increment reference count for the element
+
+          this.heap.decRef(array); // Decrement reference count for the array
+          this.heap.decRef(index); // Decrement reference count for the index
         } catch (error) {
+          this.heap.decRef(index);
+          this.heap.decRef(array);
           throw new Error(`Array index out of bounds: ${indexValue}`);
         }
         break;

@@ -35,5 +35,8 @@
     "tslib": "^2.8.1",
     "tsx": "^4.19.3",
     "typescript": "^5.5.3"
+  },
+  "dependencies": {
+    "color-name": "^2.0.0"
   }
 }

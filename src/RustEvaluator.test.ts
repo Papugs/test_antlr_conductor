@@ -1,6 +1,8 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert";
 import { RustEvaluator } from "./RustEvaluator";
+import { Heap } from "./Heap";
+import { RustVM } from "./RustVM";
 
 class MockConductor {
   outputs: string[] = [];
@@ -13,10 +15,16 @@ class MockConductor {
 describe("RustEvaluator", () => {
   let evaluator: RustEvaluator;
   let mockConductor: MockConductor;
+  let heap: Heap;
+  let vm: RustVM;
+
+  
 
   beforeEach(() => {
     mockConductor = new MockConductor();
     evaluator = new RustEvaluator(mockConductor as any);
+    vm = new RustVM(10000);
+    heap = vm['heap'];
   });
 
   // EXPRESSIONS
@@ -671,4 +679,165 @@ describe("RustEvaluator", () => {
     `);
     assert.strictEqual(mockConductor.outputs[0], "Error: mismatched types: expected `i32`, found `&str`");
   });
+
+
+  // REFERENCE COUNTING TESTS
+  it("should increment ref count when pushing to stack", () => {
+    const value = 42;
+    const address = heap.JS_value_to_address(value);
+    const initialRefCount = heap['refCounts'].get(address) || 0;
+    
+    vm['push'](address);
+    
+    const newRefCount = heap['refCounts'].get(address);
+    assert.strictEqual(newRefCount, initialRefCount + 1);
+  });
+
+  it("should decrement ref count when popping from stack", () => {
+    const value = 42;
+    const address = heap.JS_value_to_address(value);
+    vm['push'](address);
+    
+    const initialRefCount = heap['refCounts'].get(address) || 0;
+    vm['pop']();
+    
+    const newRefCount = heap['refCounts'].get(address);
+    assert.strictEqual(newRefCount, initialRefCount - 1);
+  });
+  
+
+  it("should handle reference counting for arrays", () => {
+    const arrayAddress = heap.heap_allocate_Array(3);
+    
+    // Create elements - these will have refcount = 1
+    const element1 = heap.JS_value_to_address(10);
+    const element2 = heap.JS_value_to_address(20);
+    const element3 = heap.JS_value_to_address(30);
+    
+    // Verify initial refcounts
+    assert.strictEqual(heap['refCounts'].get(element1), 1);
+    assert.strictEqual(heap['refCounts'].get(element2), 1);
+    assert.strictEqual(heap['refCounts'].get(element3), 1);
+    
+    // Store in array - refcount should become 2
+    heap.heap_set_Array_element(arrayAddress, 0, element1);
+    heap.heap_set_Array_element(arrayAddress, 1, element2);
+    heap.heap_set_Array_element(arrayAddress, 2, element3);
+    
+    // Verify refcounts after storing
+    assert.strictEqual(heap['refCounts'].get(element1), 2);
+    assert.strictEqual(heap['refCounts'].get(element2), 2);
+    assert.strictEqual(heap['refCounts'].get(element3), 2);
+    
+    // Decrement array ref - should decrement elements to 1
+    heap.decRef(arrayAddress);
+    
+    // Verify refcounts after array decrement
+    assert.strictEqual(heap['refCounts'].get(element1), 1);
+    assert.strictEqual(heap['refCounts'].get(element2), 1);
+    assert.strictEqual(heap['refCounts'].get(element3), 1);
+    
+    // Clean up test elements
+    heap.decRef(element1);
+    heap.decRef(element2);
+    heap.decRef(element3);
+    
+    // Verify elements were collected
+    assert.strictEqual(heap['refCounts'].get(element1), undefined);
+    assert.strictEqual(heap['refCounts'].get(element2), undefined);
+    assert.strictEqual(heap['refCounts'].get(element3), undefined);
 });
+
+  it("should handle reference counting for closures", () => {
+    const envAddress = heap.heap_allocate_Environment(1);
+    const closureAddress = heap.heap_allocate_Closure(1, 0, envAddress);
+    
+    assert.strictEqual(heap['refCounts'].get(envAddress), 2);
+    assert.strictEqual(heap['refCounts'].get(closureAddress), 1);
+    heap.decRef(closureAddress);
+    assert.strictEqual(heap['refCounts'].get(envAddress), 1);
+  });
+
+  it("should handle reference counting for environments", () => {
+    const frame1 = heap.heap_allocate_Frame(2);
+    const frame2 = heap.heap_allocate_Frame(2);
+    const env1 = heap.heap_allocate_Environment(1);
+    const env2 = heap.heap_Environment_extend(frame1, env1);
+    const env3 = heap.heap_Environment_extend(frame2, env2);
+    
+    assert.strictEqual(heap['refCounts'].get(frame1), 1);
+    assert.strictEqual(heap['refCounts'].get(frame2), 1);
+    assert.strictEqual(heap['refCounts'].get(env1), 1);
+    assert.strictEqual(heap['refCounts'].get(env2), 1);
+    assert.strictEqual(heap['refCounts'].get(env3), 1);
+    
+    heap.decRef(env3);
+    assert.strictEqual(heap['refCounts'].get(frame2), 0);
+    assert.strictEqual(heap['refCounts'].get(env2), 0);
+  });
+
+  it("should handle reference counting in VM operations", async () => {
+    const evaluator = new RustEvaluator(mockConductor as any);
+    await evaluator.evaluateChunk(`
+      fn main() {
+        let x = vec![1, 2, 3];
+        let y = x; // Ownership transfer
+        println!("{:?}", y);
+      }
+    `);
+    
+    assert.strictEqual(mockConductor.outputs[0], "[1,2,3]");
+  });
+
+  it("should handle reference counting with function calls", async () => {
+    const evaluator = new RustEvaluator(mockConductor as any);
+    await evaluator.evaluateChunk(`
+      fn take_ownership(v: Vec<i32>) {
+        println!("{:?}", v);
+      }
+      
+      fn main() {
+        let v = vec![1, 2, 3];
+        take_ownership(v);
+      }
+    `);
+    
+    assert.strictEqual(mockConductor.outputs[0], "[1,2,3]");
+  });
+
+  it("should handle reference counting with borrowing", async () => {
+    const evaluator = new RustEvaluator(mockConductor as any);
+    await evaluator.evaluateChunk(`
+      fn print_vec(v: &Vec<i32>) {
+        println!("{:?}", v);
+      }
+      
+      fn main() {
+        let v = vec![1, 2, 3];
+        print_vec(&v);
+        println!("{:?}", v); // v is still valid
+      }
+    `);
+    
+    assert.strictEqual(mockConductor.outputs[0], "[1,2,3]");
+    assert.strictEqual(mockConductor.outputs[1], "[1,2,3]");
+  });
+
+  it("should clean up references when VM completes", async () => {
+    const evaluator = new RustEvaluator(mockConductor as any);
+    await evaluator.evaluateChunk(`
+      fn create_data() -> Vec<Vec<i32>> {
+        vec![vec![1, 2], vec![3, 4], vec![5, 6]]
+      }
+      
+      fn main() {
+        let data = create_data();
+        println!("{:?}", data);
+      }
+    `);
+    
+    assert.strictEqual(mockConductor.outputs[0], "[[1,2],[3,4],[5,6]]");
+  });
+});
+
+
